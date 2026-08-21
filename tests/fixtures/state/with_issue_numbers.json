@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-20T03:00:00Z",
+  "tooling": {
+    "syft": "1.20.0",
+    "grype": "0.87.0",
+    "grype_db_built": "2026-08-20T01:29:00Z"
+  },
+  "findings": {
+    "CVE-2020-14343::python::pyyaml": {
+      "id": "CVE-2020-14343",
+      "aliases": [
+        "CVE-2020-14343",
+        "GHSA-8q59-q68h-6hv4"
+      ],
+      "package": {
+        "name": "pyyaml",
+        "type": "python",
+        "versions": [
+          "5.3.1"
+        ]
+      },
+      "severity": "Critical",
+      "fixed_in": [
+        "5.4"
+      ],
+      "fix_state": "fixed",
+      "first_seen": "2026-08-01",
+      "last_seen": "2026-08-20",
+      "issue_number": 42
+    },
+    "CVE-2018-18074::python::requests": {
+      "id": "CVE-2018-18074",
+      "aliases": [
+        "CVE-2018-18074",
+        "GHSA-x84v-xcm2-53pg"
+      ],
+      "package": {
+        "name": "requests",
+        "type": "python",
+        "versions": [
+          "2.19.1"
+        ]
+      },
+      "severity": "High",
+      "fixed_in": [
+        "2.20.0"
+      ],
+      "fix_state": "fixed",
+      "first_seen": "2026-08-01",
+      "last_seen": "2026-08-20",
+      "issue_number": 43
+    },
+    "CVE-2022-40897::python::setuptools": {
+      "id": "CVE-2022-40897",
+      "aliases": [
+        "CVE-2022-40897",
+        "GHSA-r9hx-vwmv-q579"
+      ],
+      "package": {
+        "name": "setuptools",
+        "type": "python",
+        "versions": [
+          "65.5.0"
+        ]
+      },
+      "severity": "Medium",
+      "fixed_in": [
+        "65.5.1"
+      ],
+      "fix_state": "fixed",
+      "first_seen": "2026-08-01",
+      "last_seen": "2026-08-20",
+      "issue_number": null
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "GHSA-v845-jxx5-vc9f",
+        "dataSource": "https://github.com/advisories/GHSA-v845-jxx5-vc9f",
+        "namespace": "github:language:python",
+        "severity": "High",
+        "fix": {
+          "versions": [
+            "1.26.18",
+            "2.0.7"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2023-45803",
+          "namespace": "nvd:cpe",
+          "severity": "High"
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "python-matcher"
+        }
+      ],
+      "artifact": {
+        "name": "urllib3",
+        "version": "1.26.15",
+        "type": "python",
+        "language": "python",
+        "purl": "pkg:pypi/urllib3@1.26.15",
+        "locations": [
+          {
+            "path": "/src/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-v845-jxx5-vc9f",
+        "dataSource": "https://github.com/advisories/GHSA-v845-jxx5-vc9f",
+        "namespace": "github:language:python",
+        "severity": "High",
+        "fix": {
+          "versions": [
+            "1.26.18",
+            "2.0.7"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2023-45803",
+          "namespace": "nvd:cpe",
+          "severity": "High"
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "python-matcher"
+        }
+      ],
+      "artifact": {
+        "name": "urllib3",
+        "version": "1.26.17",
+        "type": "python",
+        "language": "python",
+        "purl": "pkg:pypi/urllib3@1.26.17",
+        "locations": [
+          {
+            "path": "/src/requirements.txt"
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "type": "directory",
+    "target": "/src"
+  },
+  "distro": {
+    "name": "",
+    "version": ""
+  },
+  "descriptor": {
+    "name": "grype",
+    "version": "0.87.0",
+    "db": {
+      "built": "2026-08-21T01:31:00Z",
+      "schemaVersion": 5
+    }
+  }
+}

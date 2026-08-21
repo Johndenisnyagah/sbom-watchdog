@@ -1,0 +1,137 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "GHSA-8q59-q68h-6hv4",
+        "dataSource": "https://github.com/advisories/GHSA-8q59-q68h-6hv4",
+        "namespace": "github:language:python",
+        "severity": "Critical",
+        "fix": {
+          "versions": [
+            "5.4"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2020-14343",
+          "namespace": "nvd:cpe",
+          "severity": "Critical"
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "python-matcher"
+        }
+      ],
+      "artifact": {
+        "name": "PyYAML",
+        "version": "5.3.1",
+        "type": "python",
+        "language": "python",
+        "purl": "pkg:pypi/PyYAML@5.3.1",
+        "locations": [
+          {
+            "path": "/src/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-x84v-xcm2-53pg",
+        "dataSource": "https://github.com/advisories/GHSA-x84v-xcm2-53pg",
+        "namespace": "github:language:python",
+        "severity": "High",
+        "fix": {
+          "versions": [
+            "2.20.0"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2018-18074",
+          "namespace": "nvd:cpe",
+          "severity": "High"
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "python-matcher"
+        }
+      ],
+      "artifact": {
+        "name": "requests",
+        "version": "2.19.2",
+        "type": "python",
+        "language": "python",
+        "purl": "pkg:pypi/requests@2.19.2",
+        "locations": [
+          {
+            "path": "/src/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-r9hx-vwmv-q579",
+        "dataSource": "https://github.com/advisories/GHSA-r9hx-vwmv-q579",
+        "namespace": "github:language:python",
+        "severity": "Medium",
+        "fix": {
+          "versions": [
+            "65.5.1"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2022-40897",
+          "namespace": "nvd:cpe",
+          "severity": "Medium"
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "python-matcher"
+        }
+      ],
+      "artifact": {
+        "name": "setuptools",
+        "version": "65.5.0",
+        "type": "python",
+        "language": "python",
+        "purl": "pkg:pypi/setuptools@65.5.0",
+        "locations": [
+          {
+            "path": "/src/requirements.txt"
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "type": "directory",
+    "target": "/src"
+  },
+  "distro": {
+    "name": "",
+    "version": ""
+  },
+  "descriptor": {
+    "name": "grype",
+    "version": "0.87.0",
+    "db": {
+      "built": "2026-08-21T01:31:00Z",
+      "schemaVersion": 5
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# Local tooling and throwaway scan output. Nothing here is part of the action.
+scratch/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

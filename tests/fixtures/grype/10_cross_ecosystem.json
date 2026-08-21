@@ -1,0 +1,98 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "GHSA-x84v-xcm2-53pg",
+        "dataSource": "https://github.com/advisories/GHSA-x84v-xcm2-53pg",
+        "namespace": "github:language:python",
+        "severity": "High",
+        "fix": {
+          "versions": [
+            "2.20.0"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2018-18074",
+          "namespace": "nvd:cpe",
+          "severity": "High"
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "python-matcher"
+        }
+      ],
+      "artifact": {
+        "name": "requests",
+        "version": "2.19.1",
+        "type": "python",
+        "language": "python",
+        "purl": "pkg:pypi/requests@2.19.1",
+        "locations": [
+          {
+            "path": "/src/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "GHSA-dddd-eeee-ffff",
+        "dataSource": "https://github.com/advisories/GHSA-dddd-eeee-ffff",
+        "namespace": "github:language:javascript",
+        "severity": "High",
+        "fix": {
+          "versions": [
+            "3.0.0"
+          ],
+          "state": "fixed"
+        }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2026-22222",
+          "namespace": "nvd:cpe",
+          "severity": "High"
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-direct-match",
+          "matcher": "python-matcher"
+        }
+      ],
+      "artifact": {
+        "name": "requests",
+        "version": "2.88.2",
+        "type": "npm",
+        "language": "javascript",
+        "purl": "pkg:npm/requests@2.88.2",
+        "locations": [
+          {
+            "path": "/src/requirements.txt"
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "type": "directory",
+    "target": "/src"
+  },
+  "distro": {
+    "name": "",
+    "version": ""
+  },
+  "descriptor": {
+    "name": "grype",
+    "version": "0.87.0",
+    "db": {
+      "built": "2026-08-21T01:31:00Z",
+      "schemaVersion": 5
+    }
+  }
+}
