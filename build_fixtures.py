@@ -171,8 +171,8 @@ def state(findings, generated="2026-08-20T03:00:00Z"):
         "schema_version": 1,
         "generated_at": generated,
         "tooling": {
-            "syft": "1.20.0",
-            "grype": "0.87.0",
+            "syft": "1.51.0",
+            "grype": "0.117.0",
             "grype_db_built": "2026-08-20T01:29:00Z",
         },
         "findings": dict(findings),

@@ -6,7 +6,7 @@ This file is the contract. When something here conflicts with a suggestion made 
 
 ## Current phase
 
-Step 2 is complete: `model.py`, `state.py` and `diff.py` are implemented and all 31 tests in `tests/test_diff.py` pass. Step 1 was done retroactively against real Syft 1.51.0 and Grype 0.117.0 output, which `parse_grype` handled unchanged; that output is captured as `real_0117.json`. The fixture descriptor blocks now carry the 0.117 shape, and `tooling_from_grype` reads the DB timestamp from either the 0.117 or the 0.87 path. Next is step 3, the `workflow_dispatch` workflow. `issues.py` and `report.py` are still empty.
+Step 3 is in progress: `.github/workflows/watchdog.yml` exists, `workflow_dispatch` only, `contents: read` only. It installs pinned Syft 1.51.0 and Grype 0.117.0, runs the suite, produces an SBOM and a scan, validates the Grype document has a `matches` key, and uploads both as artifacts. It deliberately does not diff, write state, file issues or commit. Scanning this repo yields three components and no findings — the toolchain is what is being proved, not the scanner. Steps 1 and 2 are complete and all 31 tests pass. `issues.py` and `report.py` are still empty.
 
 Step numbers refer to the build order below, not to the six phases in the original project brief. The two do not line up, and the build order governs.
 
@@ -68,9 +68,10 @@ Path: `.sbom-watchdog/findings.json`, committed to the repository. Committing is
   "schema_version": 1,
   "generated_at": "2026-08-21T03:00:00Z",
   "tooling": {
-    "syft": "1.20.0",
-    "grype": "0.87.0",
-    "grype_db_built": "2026-08-21T01:31:00Z"
+    "syft": "1.51.0",
+    "grype": "0.117.0",
+    "grype_db_built": "2026-08-21T01:31:00Z",
+    "grype_db_schema_version": "v6.1.9"
   },
   "findings": {
     "CVE-2020-14343::python::pyyaml": {
@@ -107,6 +108,8 @@ When matches collapse, `fixed_in` is the union across all of them and `fix_state
 `versions` is a list because a dependency tree genuinely ships two copies of the same package at different versions, and both are vulnerable. Sort it before writing so the committed file does not churn.
 
 `issue_number` is the deduplication mechanism. Its presence means the issue already exists; skip creation. `null` means the finding was recorded but no issue was filed, which is the normal state for anything below the severity threshold.
+
+`tooling` is provenance only. Nothing reads it back: both document readers touch `findings` alone. Adding a key there therefore does not require a `schema_version` bump, which is why `grype_db_schema_version` arrived without one.
 
 `tooling.grype_db_built` is read through a tolerant accessor that tries both the 0.117 path (`descriptor.db.status.built`) and the older 0.87 path (`descriptor.db.built`). Grype relocated the field once already. A missing value is recorded as null rather than raising: provenance degrading is survivable, a scan aborting is not.
 

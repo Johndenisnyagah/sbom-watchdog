@@ -1,0 +1,4 @@
+# Development and CI only. src/model.py, src/state.py and src/diff.py are
+# standard library only; nothing here is a runtime dependency of the action.
+pytest==9.1.1
+ruff==0.16.4

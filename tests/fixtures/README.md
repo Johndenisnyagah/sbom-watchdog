@@ -37,4 +37,4 @@ Severity ratings are chosen to exercise the threshold logic and deliberately do 
 
 `build_fixtures.py` at the repository root wrote these, with the exception of `real_0117.json`. Editing the JSON directly is fine for a one-off; edit the script when a change affects several files at once, so the reports stay internally consistent.
 
-`real_0117.json` is captured, not generated: running `build_fixtures.py` neither overwrites nor recreates it. Replacing it means re-running Syft and Grype against the same pinned requirements and scrubbing the paths again.
+`real_0117.json` is captured, not generated: running `build_fixtures.py` neither overwrites nor recreates it. It is semantically verbatim but re-serialised through `json.dumps(indent=2)`, so its whitespace differs from raw Grype output; every value and the key order are preserved. Replacing it means re-running Syft and Grype against the same pinned requirements and scrubbing the paths again.

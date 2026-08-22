@@ -1,0 +1,9 @@
+# Keep the local development tree out of the inventory. On a clean checkout
+# none of these exist, which is exactly why the exclusions are easy to forget:
+# without them `syft scan dir:.` on a developer machine inventories the venv
+# and the vendored scanner binaries and reports several hundred components.
+exclude:
+  - ./.venv/**
+  - ./scratch/**
+  - ./.git/**
+  - ./node_modules/**

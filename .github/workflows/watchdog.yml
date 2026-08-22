@@ -1,0 +1,118 @@
+# Build-order step 3: prove Syft and Grype install and produce output on a
+# runner. Deliberately does nothing else — no diff, no state file, no issues,
+# no commit. Those arrive in steps 4 and 5, and each needs a permission this
+# workflow does not have.
+name: watchdog (dispatch only)
+
+on:
+  workflow_dispatch:
+
+# Read-only. contents:write and issues:write arrive with the steps that need
+# them, not before.
+permissions:
+  contents: read
+
+env:
+  # Pinned deliberately. An unpinned scanner that changes its JSON schema under
+  # you is the exact failure real_0117.json exists to catch, and it should
+  # happen on a version bump someone chose, not on an unrelated Tuesday.
+  SYFT_VERSION: v1.51.0
+  GRYPE_VERSION: v0.117.0
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # Third-party actions are pinned by commit SHA for the same reason Syft
+      # and Grype are pinned by version: a moving tag is somebody else's
+      # decision to run new code in this workspace.
+      - name: Check out the repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.14'
+
+      # If the parser is broken, fail here rather than producing a scan nobody
+      # validated. The suite is stdlib-only apart from pytest itself.
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Run the test suite
+        run: python -m pytest -q
+
+      - name: Install Syft ${{ env.SYFT_VERSION }}
+        run: |
+          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
+            | sh -s -- -b "$RUNNER_TEMP/bin" "${SYFT_VERSION}"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Install Grype ${{ env.GRYPE_VERSION }}
+        run: |
+          curl -sSfL "https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh" \
+            | sh -s -- -b "$RUNNER_TEMP/bin" "${GRYPE_VERSION}"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Report tool versions
+        run: |
+          syft version
+          grype version
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p out
+          syft scan dir:. -o cyclonedx-json=out/sbom.cdx.json
+
+      - name: Scan the SBOM with Grype
+        # Grype exits non-zero when it finds vulnerabilities at or above its
+        # fail-on threshold. Nothing is set here, but be explicit: this step
+        # proves the tools run, and findings are not a failure of that.
+        run: grype "sbom:out/sbom.cdx.json" -o json --file out/grype.json
+
+      # Zero matches is the expected outcome for this repo and must not fail
+      # the run. A document missing `matches` entirely, or truncated, must —
+      # that is the difference between "nothing to report" and "no report".
+      - name: Validate the Grype document
+        run: |
+          python - <<'PY'
+          import json, sys
+
+          try:
+              report = json.load(open("out/grype.json"))
+          except (OSError, json.JSONDecodeError) as exc:
+              sys.exit(f"Grype output is not readable JSON: {exc}")
+
+          if not isinstance(report, dict):
+              sys.exit(f"Grype output is {type(report).__name__}, expected an object")
+          if "matches" not in report:
+              sys.exit("Grype output has no top-level 'matches' key")
+          if not isinstance(report["matches"], list):
+              sys.exit("Grype 'matches' is not a list")
+
+          print(f"document valid: {len(report['matches'])} matches")
+          PY
+
+      - name: Summarise what was produced
+        run: |
+          echo "SBOM:  $(wc -c < out/sbom.cdx.json) bytes"
+          echo "Grype: $(wc -c < out/grype.json) bytes"
+          python - <<'PY'
+          import json
+          report = json.load(open("out/grype.json"))
+          matches = report.get("matches", [])
+          descriptor = report.get("descriptor", {})
+          db = descriptor.get("db", {})
+          status = db.get("status", {}) if isinstance(db, dict) else {}
+          print(f"grype {descriptor.get('version')}, {len(matches)} matches")
+          print("db built:", status.get("built", db.get("built")))
+          PY
+
+      - name: Upload SBOM and scan output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: sbom-and-scan
+          path: out/
+          retention-days: 7
