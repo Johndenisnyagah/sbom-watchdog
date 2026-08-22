@@ -6,7 +6,7 @@ This file is the contract. When something here conflicts with a suggestion made 
 
 ## Current phase
 
-Step 2 is complete: `model.py`, `state.py` and `diff.py` are implemented and all 30 tests in `tests/test_diff.py` pass, including `11_same_cve_other_ecosystem.json`, the only fixture constraining `package_type` in the reconciler. Step 1 has now been done retroactively — Syft 1.51.0 and Grype 0.117.0 were run against a stale requirements.txt and `parse_grype` handled the real output without changes. Two fixture-schema drifts are recorded below and not yet corrected. Next is step 3, the `workflow_dispatch` workflow. `issues.py` and `report.py` are still empty.
+Step 2 is complete: `model.py`, `state.py` and `diff.py` are implemented and all 31 tests in `tests/test_diff.py` pass. Step 1 was done retroactively against real Syft 1.51.0 and Grype 0.117.0 output, which `parse_grype` handled unchanged; that output is captured as `real_0117.json`. The fixture descriptor blocks now carry the 0.117 shape, and `tooling_from_grype` reads the DB timestamp from either the 0.117 or the 0.87 path. Next is step 3, the `workflow_dispatch` workflow. `issues.py` and `report.py` are still empty.
 
 Step numbers refer to the build order below, not to the six phases in the original project brief. The two do not line up, and the build order governs.
 
@@ -108,6 +108,8 @@ When matches collapse, `fixed_in` is the union across all of them and `fix_state
 
 `issue_number` is the deduplication mechanism. Its presence means the issue already exists; skip creation. `null` means the finding was recorded but no issue was filed, which is the normal state for anything below the severity threshold.
 
+`tooling.grype_db_built` is read through a tolerant accessor that tries both the 0.117 path (`descriptor.db.status.built`) and the older 0.87 path (`descriptor.db.built`). Grype relocated the field once already. A missing value is recorded as null rather than raising: provenance degrading is survivable, a scan aborting is not.
+
 Bump `schema_version` on any shape change and write a migration in `state.py`. Never silently reinterpret an old file.
 
 ## Three behaviours that must not regress
@@ -157,6 +159,8 @@ def state_from_findings(findings: dict[str, Finding], *, provenance: dict,
 def load_state(path) -> dict | None: ...      # None when the file is absent
 def save_state(path, state: dict) -> None: ...
 def utc_now() -> str: ...                     # ISO 8601, trailing Z
+def tooling_from_grype(report: dict,
+                       syft_version: str | None = None) -> dict: ...
 
 # provenance maps finding key -> {"first_seen": str, "issue_number": int|None}.
 # Phase 4 mutates that dict after filing issues, then serialises once.
@@ -202,6 +206,8 @@ An unrecognised threshold raises `ValueError`. Scoring it as unknown sorts it la
 ## Tests
 
 Fixtures live in `tests/fixtures/grype/` and `tests/fixtures/state/`, described in `tests/fixtures/README.md`. Every fixture exists because of a specific failure mode; do not delete one to make a test pass.
+
+`real_0117.json` is the one observed fixture rather than a reconstruction: genuine Grype 0.117.0 output, absolute paths scrubbed and nothing else altered. `build_fixtures.py` does not generate it, so regenerating the fixture set neither overwrites nor recreates it. It is the only thing that would catch a Grype schema change before a red workflow run does.
 
 Tests are the specification for phase 2. If a test fails, the implementation is wrong until an argument is made here that the test is.
 

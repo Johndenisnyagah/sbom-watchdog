@@ -22,6 +22,7 @@ __all__ = [
     "provenance_from_state",
     "save_state",
     "state_from_findings",
+    "tooling_from_grype",
     "utc_now",
 ]
 
@@ -39,6 +40,50 @@ def utc_now() -> str:
     is the only clock call in the module.
     """
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _first_present(*candidates):
+    """The first candidate that is not None, or None if there is no such thing."""
+    for value in candidates:
+        if value is not None:
+            return value
+    return None
+
+
+def _as_dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def tooling_from_grype(report: dict, syft_version: str | None = None) -> dict:
+    """Extract the tooling block for the state file from a Grype report.
+
+    The DB build timestamp is read through both known paths: Grype 0.117 puts
+    it at descriptor.db.status.built, 0.87 put it at descriptor.db.built. It
+    has moved once, so assume it moves again — every lookup here degrades to
+    None rather than raising. Losing a line of provenance is survivable; a scan
+    aborting because a metadata field was relocated is not.
+
+    `syft_version` is passed in because a Grype report does not record which
+    Syft produced the SBOM it consumed.
+    """
+    descriptor = _as_dict(_as_dict(report).get("descriptor"))
+    db = _as_dict(descriptor.get("db"))
+    status = _as_dict(db.get("status"))
+
+    tooling = {
+        "syft": syft_version,
+        "grype": descriptor.get("version"),
+        "grype_db_built": _first_present(status.get("built"), db.get("built")),
+        "grype_db_schema_version": _first_present(
+            status.get("schemaVersion"), db.get("schemaVersion")
+        ),
+    }
+    if tooling["grype_db_built"] is None:
+        _LOG.info(
+            "no DB build timestamp at descriptor.db.status.built or "
+            "descriptor.db.built; recording null. Grype may have moved it again."
+        )
+    return tooling
 
 
 def _require_supported_schema(state: dict) -> None:

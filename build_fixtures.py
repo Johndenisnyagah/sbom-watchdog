@@ -47,10 +47,18 @@ def report(matches):
         "matches": matches,
         "source": {"type": "directory", "target": "/src"},
         "distro": {"name": "", "version": ""},
+        # Grype 0.117 shape. The DB build timestamp used to sit at db.built
+        # and moved under db.status; db.providers is omitted as twenty feeds
+        # of noise nothing reads.
         "descriptor": {
             "name": "grype",
-            "version": "0.87.0",
-            "db": {"built": "2026-08-21T01:31:00Z", "schemaVersion": 5},
+            "version": "0.117.0",
+            "db": {
+                "status": {
+                    "built": "2026-08-21T01:31:00Z",
+                    "schemaVersion": "v6.1.9",
+                },
+            },
         },
     }
 

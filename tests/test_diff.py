@@ -9,7 +9,7 @@ import pathlib
 
 import pytest
 
-from src.diff import diff, select_for_issues
+from src.diff import SEVERITY_ORDER, diff, select_for_issues
 from src.model import parse_grype
 from src.state import findings_from_state
 
@@ -247,3 +247,15 @@ def test_diff_module_imports_nothing_it_should_not():
     banned = {"os", "sys", "pathlib", "requests", "urllib", "datetime",
               "time", "subprocess", "json", "github"}
     assert not (imported & banned), f"diff.py imports {imported & banned}"
+
+
+def test_parses_real_grype_output():
+    """Captured from Grype 0.117 against a deliberately stale requirements.txt.
+    Every other fixture is a reconstruction; this one is ground truth. It exists
+    to fail when a Grype schema change breaks the parser, which is otherwise
+    something we'd discover from a red workflow run."""
+    findings = grype("real_0117.json")
+    assert len(findings) == 22
+    assert "CVE-2020-14343::python::pyyaml" in findings
+    assert all(f.package_type == "python" for f in findings.values())
+    assert all(f.severity in SEVERITY_ORDER for f in findings.values())
