@@ -6,7 +6,7 @@ This file is the contract. When something here conflicts with a suggestion made 
 
 ## Current phase
 
-Step 3 is in progress: `.github/workflows/watchdog.yml` exists, `workflow_dispatch` only, `contents: read` only. It installs pinned Syft 1.51.0 and Grype 0.117.0, runs the suite, produces an SBOM and a scan, validates the Grype document has a `matches` key, and uploads both as artifacts. It deliberately does not diff, write state, file issues or commit. Scanning this repo yields three components and no findings — the toolchain is what is being proved, not the scanner. Steps 1 and 2 are complete and all 31 tests pass. `issues.py` and `report.py` are still empty.
+Step 4 part 1 is done: `src/run.py` wires parse, load, diff and save together, takes every path as an argument, prints a summary and writes the next state document. It files no issues and commits nothing. The workflow runs it after the scan and uploads the state document it *would* write as an artifact, still under `contents: read`. Step 3 is complete: `.github/workflows/watchdog.yml` exists, `workflow_dispatch` only, `contents: read` only. It installs pinned Syft 1.51.0 and Grype 0.117.0, runs the suite, produces an SBOM and a scan, validates the Grype document has a `matches` key, and uploads both as artifacts. It deliberately does not diff, write state, file issues or commit. Scanning this repo yields three components and no findings — the toolchain is what is being proved, not the scanner. Steps 1 and 2 are complete and all 31 tests pass; `run.py` itself has no test coverage yet. `issues.py` and `report.py` are still empty. Nothing has been granted `contents: write` or `issues: write`.
 
 Step numbers refer to the build order below, not to the six phases in the original project brief. The two do not line up, and the build order governs.
 
@@ -132,9 +132,19 @@ src/
 ├── model.py    Grype JSON -> Finding objects, ID normalisation
 ├── state.py    load/save state file, schema versioning, bootstrap detection
 ├── diff.py     pure: (previous, current) -> DiffResult
+├── run.py      orchestrator: paths in, summary out, state document written
 ├── issues.py   GitHub API
 └── report.py   SECURITY-INVENTORY.md generation
 ```
+
+`run.py` is the only module that reads a clock, touches the filesystem and
+knows where files live. Every path arrives as a command-line argument, so
+nothing hardcodes `.sbom-watchdog/findings.json`: the workflow passes it and
+the tests point somewhere else. It writes the state document from the diff
+result rather than from the parsed scan, because reconciliation moves a
+finding back to the key it was first filed under and that key is what
+`first_seen` and `issue_number` hang off. Resolved findings are dropped from
+the new state; git history is what preserves them.
 
 `diff.py` imports from `model.py` only. It does not touch the filesystem, the network, the clock, or `os.environ`. Everything it needs arrives as an argument. This is what makes the fixture tests possible, and it is the constraint most likely to get quietly violated when wiring up phase 4.
 

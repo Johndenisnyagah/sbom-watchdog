@@ -145,6 +145,14 @@ jobs:
           print("db built:", status.get("built", db.get("built")))
           PY
 
+      # Runs the diff and writes the state document it *would* commit, to a
+      # temp path. Nothing is committed and no issue is filed: this job still
+      # holds contents:read only. The artifact is here to be read before the
+      # next phase is given permission to write anything.
+      - name: Compute the state document (writes nothing to the repo)
+        run: |
+          python -m src.run             --scan out/grype.json             --state .sbom-watchdog/findings.json             --out out/findings.next.json             --syft-version "${SYFT_VERSION#v}"
+
       - name: Upload SBOM and scan output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
