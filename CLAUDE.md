@@ -6,7 +6,7 @@ This file is the contract. When something here conflicts with a suggestion made 
 
 ## Current phase
 
-Step 4 part 1 is done: `src/run.py` wires parse, load, diff and save together, takes every path as an argument, prints a summary and writes the next state document. It files no issues and commits nothing. The workflow runs it after the scan and uploads the state document it *would* write as an artifact, still under `contents: read`. Step 3 is complete: `.github/workflows/watchdog.yml` exists, `workflow_dispatch` only, `contents: read` only. It installs pinned Syft 1.51.0 and Grype 0.117.0, runs the suite, produces an SBOM and a scan, validates the Grype document has a `matches` key, and uploads both as artifacts. It deliberately does not diff, write state, file issues or commit. Scanning this repo yields three components and no findings — the toolchain is what is being proved, not the scanner. Steps 1 and 2 are complete and all 31 tests pass; `run.py` itself has no test coverage yet. `issues.py` and `report.py` are still empty. Nothing has been granted `contents: write` or `issues: write`.
+Step 4 part 2 is done: `run.py` gained `--write-state`, which updates the state file in place and only when the document actually changed. The workflow now holds `contents: write`, is serialised with `concurrency`, and commits `.sbom-watchdog/findings.json` as github-actions[bot], rebasing before it pushes. Issue creation is still not built; that is part 3 and needs `issues: write`. `tests/test_run.py` covers bootstrap, idempotency, provenance carry-forward and the reconciled-key case. Previously: step 4 part 1: `src/run.py` wires parse, load, diff and save together, takes every path as an argument, prints a summary and writes the next state document. It files no issues and commits nothing. The workflow runs it after the scan and uploads the state document it *would* write as an artifact, still under `contents: read`. Step 3 is complete: `.github/workflows/watchdog.yml` exists, `workflow_dispatch` only, `contents: read` only. It installs pinned Syft 1.51.0 and Grype 0.117.0, runs the suite, produces an SBOM and a scan, validates the Grype document has a `matches` key, and uploads both as artifacts. It deliberately does not diff, write state, file issues or commit. Scanning this repo yields three components and no findings — the toolchain is what is being proved, not the scanner. Steps 1 and 2 are complete and all 38 tests pass. `issues.py` and `report.py` are still empty. Nothing has been granted `contents: write` or `issues: write`.
 
 Step numbers refer to the build order below, not to the six phases in the original project brief. The two do not line up, and the build order governs.
 
@@ -115,6 +115,8 @@ When matches collapse, `fixed_in` is the union across all of them and `fix_state
 
 The vulnerability database is deliberately not cached between runs. On a runner Grype downloads a fresh DB and completes the scan in about 60 seconds. Caching it would trade a stale-CVE risk against under a minute of wall time, in a tool whose entire premise is catching newly-disclosed CVEs. `tooling.grype_db_built` records which DB a given run actually used, so a stale one would at least be visible after the fact.
 
+The commit-back decides whether to commit with `state_documents_equal`, not with `git diff`. `generated_at` moves on every run, so a textual comparison would commit daily with nothing in it. The comparison is semantic and only top-level keys can be ignored. Note the consequence: `last_seen` and `tooling.grype_db_built` both advance daily, so a repo with any findings at all still commits once a day even when nothing was found or resolved. That is the cost of keeping `last_seen` truthful, and it is a decision to revisit if the history gets noisy.
+
 Bump `schema_version` on any shape change and write a migration in `state.py`. Never silently reinterpret an old file.
 
 ## Three behaviours that must not regress
@@ -176,6 +178,8 @@ def save_state(path, state: dict) -> None: ...
 def utc_now() -> str: ...                     # ISO 8601, trailing Z
 def tooling_from_grype(report: dict,
                        syft_version: str | None = None) -> dict: ...
+def state_documents_equal(previous: dict | None, current: dict | None, *,
+                          ignore: tuple[str, ...] = ("generated_at",)) -> bool: ...
 
 # provenance maps finding key -> {"first_seen": str, "issue_number": int|None}.
 # Phase 4 mutates that dict after filing issues, then serialises once.

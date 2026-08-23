@@ -7,10 +7,17 @@ name: watchdog (dispatch only)
 on:
   workflow_dispatch:
 
-# Read-only. contents:write and issues:write arrive with the steps that need
-# them, not before.
+# contents:write for the state file commit-back, and nothing else. issues:write
+# arrives with step 4 part 3, which is the step that actually files issues.
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  # The state file is a read-modify-write on a committed file, so two runs must
+  # not interleave. Queue rather than cancel: cancelling would throw away a
+  # completed scan, and the point of the tool is not to miss one.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   # Pinned deliberately. An unpinned scanner that changes its JSON schema under
@@ -30,6 +37,10 @@ jobs:
       # decision to run new code in this workspace.
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Full history: the commit-back rebases onto origin before pushing,
+          # and a depth-1 clone has nothing to rebase onto.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -145,13 +156,50 @@ jobs:
           print("db built:", status.get("built", db.get("built")))
           PY
 
-      # Runs the diff and writes the state document it *would* commit, to a
-      # temp path. Nothing is committed and no issue is filed: this job still
-      # holds contents:read only. The artifact is here to be read before the
-      # next phase is given permission to write anything.
-      - name: Compute the state document (writes nothing to the repo)
+      # Updates the state file in place, but only when the document actually
+      # changed. `changed` is set from state_documents_equal, not from git:
+      # generated_at moves on every run, so a textual diff would commit daily
+      # with nothing in it.
+      - name: Update the state document
+        id: state
         run: |
-          python -m src.run             --scan out/grype.json             --state .sbom-watchdog/findings.json             --out out/findings.next.json             --syft-version "${SYFT_VERSION#v}"
+          set -euo pipefail
+          python -m src.run             --scan out/grype.json             --state .sbom-watchdog/findings.json             --write-state             --syft-version "${SYFT_VERSION#v}"
+          # The artifact carries the state file either way, changed or not.
+          if [ -f .sbom-watchdog/findings.json ]; then
+            cp .sbom-watchdog/findings.json out/findings.json
+          fi
+
+      - name: Commit the updated state file
+        if: steps.state.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # checkout v6 moved the persisted credential out of .git/config, so
+          # record whether an ambient one exists rather than assuming either way.
+          if git config --local --get-regexp '^http\..*\.extraheader' >/dev/null 2>&1; then
+            echo "ambient credential IS present in .git/config"
+          else
+            echo "no ambient credential in .git/config - the explicit token is doing the work"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .sbom-watchdog/findings.json
+          git commit -m "Update vulnerability state" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
+
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          # Rebase first: a concurrent run on the same ref would otherwise make
+          # this a hard failure rather than a retry.
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Report that nothing changed
+        if: steps.state.outputs.changed != 'true'
+        run: echo "no change; nothing committed"
 
       - name: Upload SBOM and scan output
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

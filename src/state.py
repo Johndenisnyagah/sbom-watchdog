@@ -21,6 +21,7 @@ __all__ = [
     "load_state",
     "provenance_from_state",
     "save_state",
+    "state_documents_equal",
     "state_from_findings",
     "tooling_from_grype",
     "utc_now",
@@ -190,6 +191,35 @@ def state_from_findings(
         "tooling": tooling,
         "findings": records,
     }
+
+
+def state_documents_equal(
+    previous: dict | None,
+    current: dict | None,
+    *,
+    ignore: tuple[str, ...] = ("generated_at",),
+) -> bool:
+    """Compare two state documents, ignoring keys that move on every run.
+
+    `generated_at` changes on every scan by definition, so a textual diff of
+    the file always reports a change and would commit one daily whether or not
+    anything was found. This comparison is semantic: it answers "is there
+    anything here worth committing", which is not a question `git diff` can be
+    asked.
+
+    Only top-level keys can be ignored. `findings` is compared in full,
+    `last_seen` included — a finding still being present today is a fact the
+    audit trail records.
+
+    A missing document (None) never equals a present one, so the first run
+    always writes.
+    """
+    if previous is None or current is None:
+        return previous is None and current is None
+    return (
+        {k: v for k, v in previous.items() if k not in ignore}
+        == {k: v for k, v in current.items() if k not in ignore}
+    )
 
 
 def load_state(path) -> dict | None:

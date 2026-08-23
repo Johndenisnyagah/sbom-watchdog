@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from .state import (
     load_state,
     provenance_from_state,
     save_state,
+    state_documents_equal,
     state_from_findings,
     tooling_from_grype,
     utc_now,
@@ -75,6 +77,20 @@ def summarise(result: DiffResult, threshold: str, scan_path: str) -> str:
     return "\n".join(lines)
 
 
+def _emit_github_output(name: str, value: str) -> None:
+    """Publish a step output when running under Actions, and do nothing when not.
+
+    The workflow gates the commit step on this rather than on `git diff`,
+    because whether the document changed is a semantic question answered by
+    state_documents_equal, not a textual one.
+    """
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(f"{name}={value}\n")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m src.run",
@@ -84,13 +100,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="path to the Grype JSON report")
     parser.add_argument("--state", required=True,
                         help="path to the existing state file; absent means bootstrap")
-    parser.add_argument("--out", required=True,
-                        help="path to write the updated state document to")
+    parser.add_argument("--out", default=None,
+                        help="path to write the updated state document to; "
+                             "not used with --write-state")
+    parser.add_argument("--write-state", action="store_true",
+                        help="update the state file in place instead of writing "
+                             "to --out, and only when the document actually changed")
     parser.add_argument("--threshold", default="High",
                         help="severity at or above which a finding would be filed")
     parser.add_argument("--syft-version", default=None,
                         help="Syft version, recorded as provenance; Grype does not report it")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not args.write_state and args.out is None:
+        parser.error("--out is required unless --write-state is given")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -115,8 +138,21 @@ def main(argv: list[str] | None = None) -> int:
         generated_at=utc_now(),
         tooling=tooling_from_grype(report, syft_version=args.syft_version),
     )
-    save_state(args.out, state)
-    print(f"state written to {args.out} ({len(state['findings'])} findings)")
+    if not args.write_state:
+        save_state(args.out, state)
+        print(f"state written to {args.out} ({len(state['findings'])} findings)")
+        return 0
+
+    # In-place mode. Writing an unchanged document would rewrite generated_at
+    # and hand git a diff with no information in it, so compare first and leave
+    # the file alone when nothing moved.
+    changed = not state_documents_equal(previous_state, state)
+    if changed:
+        save_state(args.state, state)
+        print(f"state written to {args.state} ({len(state['findings'])} findings)")
+    else:
+        print("no change; nothing committed")
+    _emit_github_output("changed", "true" if changed else "false")
     return 0
 
 
