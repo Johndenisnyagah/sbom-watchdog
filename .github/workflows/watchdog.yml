@@ -42,6 +42,26 @@ jobs:
           # and a depth-1 clone has nothing to rebase onto.
           fetch-depth: 0
 
+      # workflow_dispatch pins github.sha at dispatch time, so checkout can hand
+      # us a tree older than the branch tip - which is exactly how two runs both
+      # decided they were bootstrapping. Re-read the state file from the ref.
+      #
+      # Only the state file is taken, not a full pull: the job should scan the
+      # code it was dispatched for, and the test suite has already run against
+      # that code by the time anything here executes.
+      - name: Sync the state file with the branch tip
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "${GITHUB_REF_NAME}"
+          remote_state="origin/${GITHUB_REF_NAME}:.sbom-watchdog/findings.json"
+          if git cat-file -e "${remote_state}" 2>/dev/null; then
+            mkdir -p .sbom-watchdog
+            git show "${remote_state}" > .sbom-watchdog/findings.json
+            echo "state file synced from origin/${GITHUB_REF_NAME}"
+          else
+            echo "no state file on origin/${GITHUB_REF_NAME} yet - this run bootstraps"
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
@@ -164,7 +184,7 @@ jobs:
         id: state
         run: |
           set -euo pipefail
-          python -m src.run             --scan out/grype.json             --state .sbom-watchdog/findings.json             --write-state             --syft-version "${SYFT_VERSION#v}"
+          python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --syft-version "${SYFT_VERSION#v}"
           # The artifact carries the state file either way, changed or not.
           if [ -f .sbom-watchdog/findings.json ]; then
             cp .sbom-watchdog/findings.json out/findings.json
@@ -174,11 +194,6 @@ jobs:
         if: steps.state.outputs.state_changed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BOOTSTRAP: ${{ steps.state.outputs.bootstrap }}
-          RECORDED: ${{ steps.state.outputs.recorded }}
-          NEW: ${{ steps.state.outputs.new }}
-          RESOLVED: ${{ steps.state.outputs.resolved }}
-          SCAN_DATE: ${{ steps.state.outputs.scan_date }}
         run: |
           set -euo pipefail
 
@@ -192,35 +207,72 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          # Bootstrap is checked first. It reports zero new by design - the
-          # whole point is that a first run files nothing - so it would
-          # otherwise fall through and announce a baseline of several hundred
-          # findings as "no change". That commit is permanent, and it is what
-          # someone reads when deciding whether to trust this thing.
-          #
-          # Otherwise: the document can change without any finding changing,
-          # because last_seen advances on every scan. Say so plainly rather
-          # than implying a finding moved.
-          if [ "${BOOTSTRAP}" = "true" ]; then
-            message="Vulnerability state: baseline, ${RECORDED} findings recorded [skip ci]"
-          elif [ "${NEW}" -gt 0 ] || [ "${RESOLVED}" -gt 0 ]; then
-            message="Vulnerability state: ${NEW} new, ${RESOLVED} resolved [skip ci]"
-          else
-            message="Vulnerability state: no change (scan of ${SCAN_DATE}) [skip ci]"
+          # run.py appends to $GITHUB_OUTPUT, so the newest value of each key is
+          # the last one written. Reading them back here means the message is
+          # built the same way on the first attempt and on every recompute.
+          latest() { grep "^$1=" "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-; }
+
+          build_message() {
+            if [ "$(latest bootstrap)" = "true" ]; then
+              echo "Vulnerability state: baseline, $(latest recorded) findings recorded [skip ci]"
+            elif [ "$(latest new)" -gt 0 ] || [ "$(latest resolved)" -gt 0 ]; then
+              echo "Vulnerability state: $(latest new) new, $(latest resolved) resolved [skip ci]"
+            else
+              echo "Vulnerability state: no change (scan of $(latest scan_date)) [skip ci]"
+            fi
+          }
+
+          stage_and_commit() {
+            git add .sbom-watchdog/findings.json
+            if git diff --cached --quiet; then
+              echo "nothing staged - the file already matches HEAD"
+              return 1
+            fi
+            git commit -m "$(build_message)" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
+          }
+
+          if ! stage_and_commit; then
+            echo "another run already recorded this; nothing to commit"
+            exit 0
           fi
 
-          # [skip ci] is redundant while the default GITHUB_TOKEN is in use,
-          # since its commits do not trigger workflows. It is what stops the
-          # loop if anyone ever swaps in a PAT.
-          git add .sbom-watchdog/findings.json
-          git commit -m "${message}" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
+          attempt=1
+          while true; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "pushed on attempt ${attempt}"
+              exit 0
+            fi
 
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          # Rebase first: a concurrent run on the same ref would otherwise make
-          # this a hard failure rather than a retry.
-          git pull --rebase origin "${GITHUB_REF_NAME}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+            if [ "${attempt}" -ge 3 ]; then
+              echo "::error::push rejected after 3 attempts"
+              exit 1
+            fi
+
+            # The state file is derived output, not text to merge, and run.py is
+            # deterministic given a scan plus a prior state. So discard our
+            # commit outright and recompute against whatever origin now holds,
+            # rather than rebasing two independently-derived versions together.
+            # out/grype.json is untracked, so reset --hard leaves the scan alone.
+            echo "push rejected on attempt ${attempt}; recomputing against origin"
+            git fetch origin "${GITHUB_REF_NAME}"
+            git reset --hard "origin/${GITHUB_REF_NAME}"
+
+            python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --syft-version "${SYFT_VERSION#v}"
+
+            if [ "$(latest state_changed)" != "true" ]; then
+              echo "another run already recorded this; nothing to commit"
+              exit 0
+            fi
+
+            if ! stage_and_commit; then
+              echo "another run already recorded this; nothing to commit"
+              exit 0
+            fi
+
+            attempt=$((attempt + 1))
+          done
 
       - name: Report that nothing changed
         if: steps.state.outputs.state_changed != 'true'

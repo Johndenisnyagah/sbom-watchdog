@@ -242,4 +242,12 @@ Timestamps are UTC, ISO 8601, with a trailing `Z`. Dates in `first_seen` and `la
 
 Workflow permissions are `contents: write` and `issues: write`. Nothing else.
 
-Two Actions facts that affect design: scheduled workflows are disabled automatically after 60 days without repository activity, so the README must warn about it. Commits pushed with the default `GITHUB_TOKEN` do not trigger other workflows, which is what prevents the commit-back step from re-triggering the scan.
+Four Actions facts that affect design.
+
+Scheduled workflows are disabled automatically after 60 days without repository activity, so the README must warn about it.
+
+Commits pushed with the default `GITHUB_TOKEN` do not trigger other workflows, which is what prevents the commit-back step from re-triggering the scan.
+
+`actions/checkout` v6 no longer persists a credential in `.git/config`. Confirmed from a run: the commit-back step logged "no ambient credential in .git/config - the explicit token is doing the work". The push therefore passes `GITHUB_TOKEN` explicitly through the remote URL. **README item for phase 6:** anyone copying an older commit-back pattern, which relies on the ambient credential, gets a failure on the very last step, after the scan has already run and the state has already been computed. That is the most expensive place to fail and the least obvious to diagnose.
+
+`workflow_dispatch` pins `github.sha` at dispatch time, so `actions/checkout` can hand a job a tree older than the branch tip. Two runs dispatched a minute apart both checked out the same pre-baseline commit and both bootstrapped, even though `concurrency` correctly serialised them: the second job started three seconds after the first finished and still read a stale tree. Serialising runs does not make them read current state. The workflow therefore re-reads the state file from the ref before scanning, and the commit-back recomputes rather than rebases if a push is rejected: the state file is derived output, not text to merge.
