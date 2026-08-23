@@ -110,8 +110,10 @@ def file_issues(selected, repo: str, token: str,
                 continue
 
             title, body, labels = render_issue(finding)
-            ensure_labels(repo, labels, token)
-            number = create_issue(repo, title, body, labels, token)
+            # ensure_labels returns only what can actually be applied; a token
+            # without label permission still gets the issue filed.
+            usable = ensure_labels(repo, labels, token)
+            number = create_issue(repo, title, body, usable, token)
             print(f"  filed #{number} for {finding.key}")
             entry["issue_number"] = number
             filed[finding.key] = number
@@ -162,8 +164,7 @@ def summarise(result: DiffResult, threshold: str, scan_path: str) -> str:
     lines.append(f"  changed:    {len(result.changed)}")
 
     selected = select_for_issues(result, threshold=threshold)
-    lines.append(f"would file {len(selected)} issue(s) at threshold {threshold}"
-                 " (nothing is filed in this phase)")
+    lines.append(f"{len(selected)} finding(s) at or above threshold {threshold}")
     for finding in selected:
         lines.append(f"    {finding.severity:9} {finding.key}")
     return "\n".join(lines)

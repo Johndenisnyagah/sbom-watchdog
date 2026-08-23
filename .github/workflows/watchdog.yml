@@ -6,11 +6,17 @@ name: watchdog (dispatch only)
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the issues that would be filed instead of filing them"
+        type: boolean
+        default: true
 
-# contents:write for the state file commit-back, and nothing else. issues:write
-# arrives with step 4 part 3, which is the step that actually files issues.
+# contents:write for the state file commit-back, issues:write to file issues.
+# Nothing else, per CLAUDE.md.
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   # The state file is a read-modify-write on a committed file, so two runs must
@@ -180,18 +186,36 @@ jobs:
       # changed. `changed` is set from state_documents_equal, not from git:
       # generated_at moves on every run, so a textual diff would commit daily
       # with nothing in it.
-      - name: Update the state document
+      # continue-on-error, and the commit step below runs with always(). The
+      # natural YAML - a failing step skipping the rest - is backwards here.
+      # CLAUDE.md fixes the order as scan, diff, create issues, write numbers,
+      # commit: numbers collected before a failure must still reach the
+      # repository, or every issue already created gets filed again tomorrow.
+      # The run is failed at the end instead, once the commit has happened.
+      - name: Update the state document and handle issues
         id: state
+        continue-on-error: true
+        env:
+          # Through the environment, never as an argument: arguments show up in
+          # process listings and in logs.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --message-file out/commit-message.txt --syft-version "${SYFT_VERSION#v}"
+          if [ "${DRY_RUN}" = "false" ]; then
+            issues_flag="--file-issues"
+          else
+            issues_flag="--dry-run-issues"
+          fi
+          echo "issue mode: ${issues_flag}"
+          python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --message-file out/commit-message.txt --repo "${GITHUB_REPOSITORY}" "${issues_flag}" --syft-version "${SYFT_VERSION#v}"
           # The artifact carries the state file either way, changed or not.
           if [ -f .sbom-watchdog/findings.json ]; then
             cp .sbom-watchdog/findings.json out/findings.json
           fi
 
       - name: Commit the updated state file
-        if: steps.state.outputs.state_changed == 'true'
+        if: always() && steps.state.outputs.state_changed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -275,10 +299,20 @@ jobs:
           done
 
       - name: Report that nothing changed
-        if: steps.state.outputs.state_changed != 'true'
+        if: always() && steps.state.outputs.state_changed != 'true'
         run: echo "no change; nothing committed"
 
+      # Last, so the commit above has already run.
+      - name: Fail the run if issue creation failed
+        if: always() && steps.state.outcome == 'failure'
+        run: |
+          echo "::error::run.py exited nonzero. Any issue numbers collected"
+          echo "::error::before the failure were still written to the state"
+          echo "::error::file and committed, so those issues will not be refiled."
+          exit 1
+
       - name: Upload SBOM and scan output
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: sbom-and-scan

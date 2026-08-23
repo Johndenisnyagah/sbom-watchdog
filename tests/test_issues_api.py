@@ -20,7 +20,7 @@ from email.message import Message
 
 import pytest
 
-from src.issues import create_issue, ensure_labels, find_existing_issue
+from src.issues import GitHubError, create_issue, ensure_labels, find_existing_issue
 
 TOKEN = "ghs_test_token"
 REPO = "owner/name"
@@ -213,6 +213,63 @@ def test_ensure_labels_posts_nothing_when_all_exist(monkeypatch):
 
     assert fake.call_count == 2
     assert all(r.get_method() == "GET" for r in fake.requests)
+
+
+def test_ensure_labels_returns_the_usable_labels(monkeypatch):
+    transport(monkeypatch, Ok(200), Ok(200))
+    assert ensure_labels(REPO, ["sbom-watchdog", "severity:low"], TOKEN) == [
+        "sbom-watchdog", "severity:low",
+    ]
+
+
+def test_ensure_labels_degrades_when_creation_is_forbidden(monkeypatch, capsys):
+    """A restrictive token must cost the adopter a label, not the issue. Labels
+    are decoration; the issue is the product."""
+    fake = transport(
+        monkeypatch,
+        Ok(200),                                   # sbom-watchdog exists
+        fail(404),                                 # severity:high does not
+        fail(403, {}, {"message": "Resource not accessible by integration"}),
+    )
+
+    usable = ensure_labels(REPO, ["sbom-watchdog", "severity:high"], TOKEN)
+
+    assert usable == ["sbom-watchdog"]
+    assert fake.call_count == 3
+    printed = capsys.readouterr().out
+    assert "no permission to create label(s) severity:high" in printed
+    assert "filing without them" in printed
+
+
+def test_ensure_labels_degrades_when_even_the_lookup_is_forbidden(monkeypatch):
+    transport(monkeypatch, fail(403), fail(403))
+    assert ensure_labels(REPO, ["sbom-watchdog", "severity:high"], TOKEN) == []
+
+
+def test_ensure_labels_logs_the_shortfall_once(monkeypatch, capsys):
+    transport(monkeypatch, fail(404), fail(403), fail(404), fail(403))
+    ensure_labels(REPO, ["severity:high", "severity:low"], TOKEN)
+
+    printed = capsys.readouterr().out
+    assert printed.count("no permission to create label(s)") == 1
+    assert "severity:high, severity:low" in printed
+
+
+def test_ensure_labels_still_raises_on_a_non_403_failure(monkeypatch):
+    """422 is a malformed request, not a permission boundary. Swallowing it
+    would hide a real bug behind a silently unlabelled issue."""
+    transport(monkeypatch, fail(404), fail(422, {}, {"message": "Validation Failed"}))
+
+    with pytest.raises(GitHubError) as caught:
+        ensure_labels(REPO, ["severity:high"], TOKEN)
+    assert caught.value.status == 422
+
+
+def test_github_error_carries_the_status_code(monkeypatch):
+    transport(monkeypatch, fail(404, {}, {"message": "Not Found"}))
+    with pytest.raises(GitHubError) as caught:
+        create_issue(REPO, "t", "b", [], TOKEN)
+    assert caught.value.status == 404
 
 
 def test_ensure_labels_url_encodes_the_label_name(monkeypatch):

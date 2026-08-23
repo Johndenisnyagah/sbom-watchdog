@@ -27,6 +27,7 @@ from typing import Any, NamedTuple
 from .model import Finding
 
 __all__ = [
+    "GitHubError",
     "advisory_url",
     "create_issue",
     "dry_run",
@@ -171,6 +172,19 @@ _MAX_SLEEP_SECONDS = 120
 _TIMEOUT = 30
 
 
+class GitHubError(RuntimeError):
+    """An API call that did not return what was expected.
+
+    Carries the status code so callers can branch on it. A 403 on label
+    creation is survivable and a 422 is not, and telling them apart by
+    matching on the text of a message is how that distinction rots.
+    """
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
+
+
 class _Response(NamedTuple):
     """A normalised HTTP result.
 
@@ -273,7 +287,8 @@ def _request(method: str, url: str, token: str, *, expect: tuple[int, ...],
         break
 
     detail = (last.body or b"")[:300].decode("utf-8", "replace")
-    raise RuntimeError(f"{method} {url} returned {last.status}: {detail}")
+    raise GitHubError(f"{method} {url} returned {last.status}: {detail}",
+                      last.status)
 
 
 def find_existing_issue(repo: str, key: str, token: str) -> int | None:
@@ -298,29 +313,59 @@ def find_existing_issue(repo: str, key: str, token: str) -> int | None:
     return None
 
 
-def ensure_labels(repo: str, labels: list[str], token: str) -> None:
-    """Create any label that does not exist yet.
+def ensure_labels(repo: str, labels: list[str], token: str) -> list[str]:
+    """Create any label that does not exist yet. Returns the usable ones.
 
     Posting an issue with a label the repository does not have does not fail;
     the label is silently dropped. Since severity is how these get triaged,
-    losing it quietly is worse than an error.
+    losing it quietly is worse than an error, so missing labels are created.
+
+    A token without permission to create labels must not cost the adopter the
+    issue itself. On 403 the label is dropped from the list and the shortfall
+    is logged once: labels are decoration, the issue is the product.
     """
+    usable: list[str] = []
+    denied: list[str] = []
+
     for label in labels:
-        response = _request(
-            "GET", f"{API_ROOT}/repos/{repo}/labels/{urllib.parse.quote(label)}",
-            token, expect=(200, 404),
-        )
-        if response.status == 200:
+        try:
+            response = _request(
+                "GET",
+                f"{API_ROOT}/repos/{repo}/labels/{urllib.parse.quote(label)}",
+                token, expect=(200, 404),
+            )
+        except GitHubError as error:
+            if error.status != 403:
+                raise
+            denied.append(label)
             continue
-        _request(
-            "POST", f"{API_ROOT}/repos/{repo}/labels", token, expect=(201,),
-            payload={
-                "name": label,
-                "color": _LABEL_COLOURS.get(label, "ededed"),
-                "description": "Managed by sbom-watchdog",
-            },
-        )
+
+        if response.status == 200:
+            usable.append(label)
+            continue
+
+        try:
+            _request(
+                "POST", f"{API_ROOT}/repos/{repo}/labels", token, expect=(201,),
+                payload={
+                    "name": label,
+                    "color": _LABEL_COLOURS.get(label, "ededed"),
+                    "description": "Managed by sbom-watchdog",
+                },
+            )
+        except GitHubError as error:
+            if error.status != 403:
+                raise
+            denied.append(label)
+            continue
+
+        usable.append(label)
         print(f"    created label {label}")
+
+    if denied:
+        print(f"    no permission to create label(s) {', '.join(denied)}; "
+              f"filing without them")
+    return usable
 
 
 def create_issue(repo: str, title: str, body: str, labels: list[str],
