@@ -140,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     # The workflow builds its commit message from these rather than parsing
     # anything back out of the document.
+    _emit_github_output("bootstrap", "true" if result.bootstrap else "false")
+    _emit_github_output("recorded", str(len(state["findings"])))
     _emit_github_output("new", str(len(result.new)))
     _emit_github_output("resolved", str(len(result.resolved)))
     _emit_github_output("unchanged", str(len(result.unchanged)))

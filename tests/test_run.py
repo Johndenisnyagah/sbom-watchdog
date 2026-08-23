@@ -26,14 +26,28 @@ def document(path: pathlib.Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def step_outputs(path: pathlib.Path) -> dict[str, str]:
+    """Parse the key=value lines run.py appends to $GITHUB_OUTPUT."""
+    pairs = (line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines() if line)
+    return {key: value for key, value in pairs}
+
+
 # --- bootstrap -----------------------------------------------------------
 
-def test_bootstrap_records_the_baseline_and_files_nothing(tmp_path, capsys):
+def test_bootstrap_records_the_baseline_and_files_nothing(tmp_path, capsys, monkeypatch):
     """First run against a real scan: every finding is recorded, none is new,
     and nothing is filed. Without this the first run on a real project opens
-    several hundred issues at once."""
+    several hundred issues at once.
+
+    The bootstrap output matters as much as the behaviour: a first run reports
+    zero new by design, so without it the workflow would announce a baseline of
+    several hundred findings as "no change" in a commit that is permanent.
+    """
     state = tmp_path / "findings.json"
     out = tmp_path / "next.json"
+    outputs = tmp_path / "step_outputs.txt"
+    outputs.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
     assert not state.exists()
 
     run(REAL, state, out)
@@ -41,6 +55,11 @@ def test_bootstrap_records_the_baseline_and_files_nothing(tmp_path, capsys):
 
     assert "bootstrap" in printed
     assert len(document(out)["findings"]) == 22
+
+    emitted = step_outputs(outputs)
+    assert emitted["bootstrap"] == "true"
+    assert emitted["recorded"] == "22"
+    assert emitted["new"] == "0"
 
     result = diff(None, parse_grype(document(REAL)))
     assert result.bootstrap is True
