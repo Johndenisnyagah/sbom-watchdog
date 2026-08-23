@@ -8,7 +8,6 @@ Every test writes through tmp_path. Nothing here touches .sbom-watchdog/.
 """
 import json
 import pathlib
-
 import re
 
 from src.diff import diff, select_for_issues

@@ -74,26 +74,46 @@ def _print(text: str) -> None:
         print(text.encode(encoding, "replace").decode(encoding))
 
 
-def file_issues(selected, repo: str, token: str) -> tuple[dict[str, int], Exception | None]:
+def file_issues(selected, repo: str, token: str,
+                provenance: dict) -> tuple[dict[str, int], Exception | None]:
     """File an issue per selected finding. Returns (key -> number, error).
 
-    Numbers are returned even when a later call fails. CLAUDE.md fixes the
-    order as scan, diff, create issues, write issue numbers, commit: an issue
-    that was created but whose number never reached state gets refiled
-    tomorrow, so a partial failure must still surrender what it collected.
+    `provenance` is updated in place as each number is obtained, which does two
+    jobs. It closes the within-run duplicate window for free: GitHub's search
+    index is eventually consistent and can miss an issue created seconds ago,
+    but a number already recorded in this process cannot be missed. And it
+    means a partial failure still leaves the numbers where the state document
+    will pick them up.
+
+    CLAUDE.md fixes the order as scan, diff, create issues, write issue
+    numbers, commit. An issue that was created but whose number never reached
+    state gets filed again tomorrow, so the numbers must survive any failure
+    here.
     """
     filed: dict[str, int] = {}
     try:
         for finding in selected:
+            entry = provenance.setdefault(
+                finding.key, {"first_seen": None, "issue_number": None})
+
+            recorded = entry.get("issue_number")
+            if recorded:
+                print(f"  #{recorded} already recorded for {finding.key}; not filing again")
+                filed[finding.key] = recorded
+                continue
+
             existing = find_existing_issue(repo, finding.key, token)
             if existing is not None:
                 print(f"  #{existing} already exists for {finding.key}")
+                entry["issue_number"] = existing
                 filed[finding.key] = existing
                 continue
+
             title, body, labels = render_issue(finding)
             ensure_labels(repo, labels, token)
             number = create_issue(repo, title, body, labels, token)
             print(f"  filed #{number} for {finding.key}")
+            entry["issue_number"] = number
             filed[finding.key] = number
     # Deliberately broad. Whatever went wrong - a network error, a 500, a
     # token losing its scope halfway through - the numbers collected so far
@@ -228,13 +248,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         selected = select_for_issues(result, threshold=args.threshold)
         print(f"\nfiling {len(selected)} issue(s) in {args.repo}")
-        filed, filing_error = file_issues(selected, args.repo, token)
-        # Written into provenance before the document is built, so the numbers
-        # are in the state file this run commits rather than the next one.
-        for key, number in filed.items():
-            entry = provenance.setdefault(key, {"first_seen": None,
-                                                "issue_number": None})
-            entry["issue_number"] = number
+        # provenance is updated in place, before the state document is built,
+        # so the numbers land in the state this run commits rather than the
+        # next one.
+        filed, filing_error = file_issues(selected, args.repo, token, provenance)
         print(f"recorded {len(filed)} issue number(s) into state")
 
     # One timestamp for the whole run: state_from_findings derives both dates

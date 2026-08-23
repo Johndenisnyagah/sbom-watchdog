@@ -1,18 +1,28 @@
 """Issue rendering, and the GitHub calls that file them.
 
-Rendering is pure and imports nothing beyond the standard library: a Finding
-in, text out. That is what lets the output be reviewed before it reaches
-anyone's tracker, and what keeps the dry-run path working on a machine with no
-`requests` installed.
+Standard library only, like everything else here. A tool whose premise is that
+dependencies are liability should not acquire one to make four API calls: the
+SBOM would grow, this scanner would start reporting CVEs against itself, and
+every adopter would inherit the transitive tree. Zero runtime dependencies is
+also the stronger claim for a supply-chain security tool to be able to make.
 
-`requests` is permitted here by CLAUDE.md, but it is imported lazily inside the
-API helpers rather than at module scope, so importing this module for rendering
-never requires it.
+Rendering is pure: a Finding in, text out, no clock and no network. Nothing in
+the rendering path touches the transport code below it, which is what lets the
+output be reviewed before it reaches anyone's tracker.
+
+urllib raises HTTPError for 4xx and 5xx rather than returning a response, so
+every call is normalised into a _Response first and the retry logic reads the
+same either way. Rate-limit headers arrive on the exception, not on a response
+object, and that is the part most likely to go wrong.
 """
 from __future__ import annotations
 
+import json
 import time
-from urllib.parse import quote
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any, NamedTuple
 
 from .model import Finding
 
@@ -158,17 +168,23 @@ def dry_run(findings: list[Finding]) -> str:
 
 _MAX_ATTEMPTS = 3
 _MAX_SLEEP_SECONDS = 120
+_TIMEOUT = 30
 
 
-def _requests():
-    try:
-        import requests
-    except ImportError as exc:
-        raise RuntimeError(
-            "filing issues needs the `requests` package; rendering and "
-            "--dry-run-issues do not"
-        ) from exc
-    return requests
+class _Response(NamedTuple):
+    """A normalised HTTP result.
+
+    urllib delivers a success through a context manager and a failure through
+    an exception. Both carry a status, headers and a body, so both are turned
+    into this before anything looks at them.
+    """
+
+    status: int
+    headers: Any
+    body: bytes
+
+    def json(self) -> Any:
+        return json.loads(self.body or b"{}")
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -180,7 +196,30 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
-def _pause_for_rate_limit(response, sleep=time.sleep) -> bool:
+def _perform(method: str, url: str, token: str, *, params: dict | None = None,
+             payload: dict | None = None) -> _Response:
+    """One HTTP call, with 4xx and 5xx returned rather than raised."""
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+
+    data = None
+    headers = _headers(token)
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    request = urllib.request.Request(url, data=data, headers=headers,
+                                     method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
+            return _Response(response.status, response.headers, response.read())
+    except urllib.error.HTTPError as error:
+        # HTTPError is itself a response: the rate-limit headers this tool
+        # depends on arrive here, not on a success.
+        return _Response(error.code, error.headers, error.read())
+
+
+def _pause_for_rate_limit(headers: Any) -> bool:
     """Wait if GitHub has asked us to. True when the call should be retried.
 
     Two mechanisms, both real: `Retry-After` on a secondary limit, and
@@ -188,25 +227,25 @@ def _pause_for_rate_limit(response, sleep=time.sleep) -> bool:
     search endpoint used for deduplication has its own much smaller budget, so
     a repo with many new findings meets this rather than never seeing it.
     """
-    retry_after = response.headers.get("Retry-After")
+    retry_after = headers.get("Retry-After")
     if retry_after:
         try:
             wait = min(int(retry_after), _MAX_SLEEP_SECONDS)
         except ValueError:
             wait = 5
         print(f"    rate limited; waiting {wait}s (Retry-After)")
-        sleep(wait)
+        time.sleep(wait)
         return True
 
-    remaining = response.headers.get("X-RateLimit-Remaining")
-    reset = response.headers.get("X-RateLimit-Reset")
+    remaining = headers.get("X-RateLimit-Remaining")
+    reset = headers.get("X-RateLimit-Reset")
     if remaining is not None and reset is not None:
         try:
             if int(remaining) <= 0:
                 wait = max(0, int(reset) - int(time.time())) + 1
                 wait = min(wait, _MAX_SLEEP_SECONDS)
                 print(f"    rate limit exhausted; waiting {wait}s for reset")
-                sleep(wait)
+                time.sleep(wait)
                 return True
         except ValueError:
             return False
@@ -214,29 +253,27 @@ def _pause_for_rate_limit(response, sleep=time.sleep) -> bool:
 
 
 def _request(method: str, url: str, token: str, *, expect: tuple[int, ...],
-             params: dict | None = None, payload: dict | None = None):
-    requests = _requests()
+             params: dict | None = None, payload: dict | None = None) -> _Response:
     last = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
-        response = requests.request(
-            method, url, headers=_headers(token), params=params, json=payload,
-            timeout=30,
-        )
+        response = _perform(method, url, token, params=params, payload=payload)
         last = response
-        if response.status_code in expect:
+        if response.status in expect:
             return response
-        if response.status_code in (403, 429) and _pause_for_rate_limit(response):
+        if response.status in (403, 429) and _pause_for_rate_limit(response.headers):
             continue
-        if response.status_code >= 500 and attempt < _MAX_ATTEMPTS:
+        if response.status >= 500 and attempt < _MAX_ATTEMPTS:
             sleep_for = min(2 ** attempt, _MAX_SLEEP_SECONDS)
-            print(f"    {response.status_code} from GitHub; retrying in {sleep_for}s")
+            print(f"    {response.status} from GitHub; retrying in {sleep_for}s")
             time.sleep(sleep_for)
             continue
+        # Everything else - 422 for a validation failure, 404 where one is not
+        # expected - is a decision, not a hiccup. Retrying it just posts the
+        # same broken request again.
         break
 
-    raise RuntimeError(
-        f"{method} {url} returned {last.status_code}: {last.text[:300]}"
-    )
+    detail = (last.body or b"")[:300].decode("utf-8", "replace")
+    raise RuntimeError(f"{method} {url} returned {last.status}: {detail}")
 
 
 def find_existing_issue(repo: str, key: str, token: str) -> int | None:
@@ -248,7 +285,8 @@ def find_existing_issue(repo: str, key: str, token: str) -> int | None:
 
     Caveat worth knowing: GitHub's search index is eventually consistent, so an
     issue created seconds ago may not come back. This narrows the window for
-    duplicates; it does not close it.
+    duplicates across runs; the within-run window is closed by the caller
+    checking provenance before it gets here.
     """
     response = _request(
         "GET", f"{API_ROOT}/search/issues", token, expect=(200,),
@@ -269,10 +307,10 @@ def ensure_labels(repo: str, labels: list[str], token: str) -> None:
     """
     for label in labels:
         response = _request(
-            "GET", f"{API_ROOT}/repos/{repo}/labels/{quote(label)}", token,
-            expect=(200, 404),
+            "GET", f"{API_ROOT}/repos/{repo}/labels/{urllib.parse.quote(label)}",
+            token, expect=(200, 404),
         )
-        if response.status_code == 200:
+        if response.status == 200:
             continue
         _request(
             "POST", f"{API_ROOT}/repos/{repo}/labels", token, expect=(201,),
