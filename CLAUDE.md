@@ -113,6 +113,8 @@ When matches collapse, `fixed_in` is the union across all of them and `fix_state
 
 `tooling.grype_db_built` is read through a tolerant accessor that tries both the 0.117 path (`descriptor.db.status.built`) and the older 0.87 path (`descriptor.db.built`). Grype relocated the field once already. A missing value is recorded as null rather than raising: provenance degrading is survivable, a scan aborting is not.
 
+The vulnerability database is deliberately not cached between runs. On a runner Grype downloads a fresh DB and completes the scan in about 60 seconds. Caching it would trade a stale-CVE risk against under a minute of wall time, in a tool whose entire premise is catching newly-disclosed CVEs. `tooling.grype_db_built` records which DB a given run actually used, so a stale one would at least be visible after the fact.
+
 Bump `schema_version` on any shape change and write a migration in `state.py`. Never silently reinterpret an old file.
 
 ## Three behaviours that must not regress
