@@ -184,7 +184,7 @@ jobs:
         id: state
         run: |
           set -euo pipefail
-          python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --syft-version "${SYFT_VERSION#v}"
+          python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --message-file out/commit-message.txt --syft-version "${SYFT_VERSION#v}"
           # The artifact carries the state file either way, changed or not.
           if [ -f .sbom-watchdog/findings.json ]; then
             cp .sbom-watchdog/findings.json out/findings.json
@@ -209,19 +209,19 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          # run.py appends to $GITHUB_OUTPUT, so the newest value of each key is
-          # the last one written. Reading them back here means the message is
-          # built the same way on the first attempt and on every recompute.
-          latest() { grep "^$1=" "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-; }
+          # The message is built in run.py, where it is testable, and read
+          # from a file here. It used to be assembled from step outputs in this
+          # shell, which is how a baseline once got committed as "no change
+          # (scan of )": $GITHUB_OUTPUT is per-step, so the values were empty
+          # and the arithmetic test silently fell through to the last branch.
+          message_file="out/commit-message.txt"
 
-          build_message() {
-            if [ "$(latest bootstrap)" = "true" ]; then
-              echo "Vulnerability state: baseline, $(latest recorded) findings recorded [skip ci]"
-            elif [ "$(latest new)" -gt 0 ] || [ "$(latest resolved)" -gt 0 ]; then
-              echo "Vulnerability state: $(latest new) new, $(latest resolved) resolved [skip ci]"
-            else
-              echo "Vulnerability state: no change (scan of $(latest scan_date)) [skip ci]"
+          read_message() {
+            if [ ! -s "${message_file}" ]; then
+              echo "::error::${message_file} is missing or empty - refusing to commit an unlabelled state change"
+              exit 1
             fi
+            head -n 1 "${message_file}"
           }
 
           stage_and_commit() {
@@ -230,7 +230,7 @@ jobs:
               echo "nothing staged - the file already matches HEAD"
               return 1
             fi
-            git commit -m "$(build_message)" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
+            git commit -m "$(read_message)" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
           }
 
           if ! stage_and_commit; then
@@ -259,9 +259,9 @@ jobs:
             git fetch origin "${GITHUB_REF_NAME}"
             git reset --hard "origin/${GITHUB_REF_NAME}"
 
-            python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --syft-version "${SYFT_VERSION#v}"
+            python -m src.run --scan out/grype.json --state .sbom-watchdog/findings.json --write-state --message-file out/commit-message.txt --syft-version "${SYFT_VERSION#v}"
 
-            if [ "$(latest state_changed)" != "true" ]; then
+            if [ "$(grep '^state_changed=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)" != "true" ]; then
               echo "another run already recorded this; nothing to commit"
               exit 0
             fi

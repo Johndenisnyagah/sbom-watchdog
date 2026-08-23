@@ -33,7 +33,7 @@ from .state import (
     utc_now,
 )
 
-__all__ = ["findings_to_record", "main"]
+__all__ = ["commit_message", "findings_to_record", "main"]
 
 
 def findings_to_record(result: DiffResult) -> dict[str, Finding]:
@@ -51,6 +51,27 @@ def findings_to_record(result: DiffResult) -> dict[str, Finding]:
     records.update({key: current for key, (_, current) in result.changed.items()})
     records.update(result.new)
     return records
+
+
+def commit_message(result: DiffResult, state: dict) -> str:
+    """The one-line summary the commit-back commits under.
+
+    Built here rather than in workflow shell. This text is permanent in
+    somebody's git history, and it is the first thing a person reads when
+    deciding whether to trust the tool. Assembling it from step outputs in bash
+    is how a baseline of findings once got committed as "no change (scan of )":
+    $GITHUB_OUTPUT is per-step, so the values simply were not there.
+
+    Bootstrap is checked first because a first run reports zero new by design.
+    """
+    if result.bootstrap:
+        return (f"Vulnerability state: baseline, {len(state['findings'])} "
+                f"findings recorded [skip ci]")
+    if result.new or result.resolved:
+        return (f"Vulnerability state: {len(result.new)} new, "
+                f"{len(result.resolved)} resolved [skip ci]")
+    return (f"Vulnerability state: no change "
+            f"(scan of {state['generated_at'][:10]}) [skip ci]")
 
 
 def summarise(result: DiffResult, threshold: str, scan_path: str) -> str:
@@ -103,6 +124,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", default=None,
                         help="path to write the updated state document to; "
                              "not used with --write-state")
+    parser.add_argument("--message-file", default=None,
+                        help="path to write the commit message to, for the "
+                             "commit-back step to read")
     parser.add_argument("--write-state", action="store_true",
                         help="update the state file in place instead of writing "
                              "to --out, and only when the document actually changed")
@@ -140,6 +164,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     # The workflow builds its commit message from these rather than parsing
     # anything back out of the document.
+    message = commit_message(result, state)
+    if args.message_file:
+        Path(args.message_file).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.message_file).write_text(message + "\n", encoding="utf-8",
+                                           newline="\n")
+        print(f"commit message: {message}")
+
     _emit_github_output("bootstrap", "true" if result.bootstrap else "false")
     _emit_github_output("recorded", str(len(state["findings"])))
     _emit_github_output("new", str(len(result.new)))
