@@ -115,7 +115,11 @@ When matches collapse, `fixed_in` is the union across all of them and `fix_state
 
 The vulnerability database is deliberately not cached between runs. On a runner Grype downloads a fresh DB and completes the scan in about 60 seconds. Caching it would trade a stale-CVE risk against under a minute of wall time, in a tool whose entire premise is catching newly-disclosed CVEs. `tooling.grype_db_built` records which DB a given run actually used, so a stale one would at least be visible after the fact.
 
-The commit-back decides whether to commit with `state_documents_equal`, not with `git diff`. `generated_at` moves on every run, so a textual comparison would commit daily with nothing in it. The comparison is semantic and only top-level keys can be ignored. Note the consequence: `last_seen` and `tooling.grype_db_built` both advance daily, so a repo with any findings at all still commits once a day even when nothing was found or resolved. That is the cost of keeping `last_seen` truthful, and it is a decision to revisit if the history gets noisy.
+The commit-back decides whether to commit with `state_documents_equal`, not with `git diff`. `generated_at` moves on every run, so a textual comparison would commit daily with nothing in it. The comparison is semantic, and it ignores `generated_at` and nothing else. No special-casing of `tooling` or `last_seen`.
+
+That means a repo with any findings commits once a day, because `last_seen` advances. That is correct and deliberate. `last_seen` advancing is the information: it distinguishes "still vulnerable as of yesterday" from "we stopped scanning in March", which is the question the audit trail exists to answer. Suppressing it to keep `git log` tidy would trade the point of the project for cosmetics.
+
+`findings.json` is working state, committed for durability; its current contents matter, not its history. The append-only audit trail is phase 5's dated SBOM path, not this file. The commit message carries the signal instead: `N new, M resolved` when findings moved, and `no change (scan of YYYY-MM-DD)` when only the scan date did. Both carry `[skip ci]`, which is redundant while the default `GITHUB_TOKEN` is in use — its commits do not trigger workflows — but is what prevents a loop if a PAT is ever swapped in.
 
 Bump `schema_version` on any shape change and write a migration in `state.py`. Never silently reinterpret an old file.
 

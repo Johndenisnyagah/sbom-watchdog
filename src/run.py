@@ -138,6 +138,14 @@ def main(argv: list[str] | None = None) -> int:
         generated_at=utc_now(),
         tooling=tooling_from_grype(report, syft_version=args.syft_version),
     )
+    # The workflow builds its commit message from these rather than parsing
+    # anything back out of the document.
+    _emit_github_output("new", str(len(result.new)))
+    _emit_github_output("resolved", str(len(result.resolved)))
+    _emit_github_output("unchanged", str(len(result.unchanged)))
+    _emit_github_output("changed_findings", str(len(result.changed)))
+    _emit_github_output("scan_date", state["generated_at"][:10])
+
     if not args.write_state:
         save_state(args.out, state)
         print(f"state written to {args.out} ({len(state['findings'])} findings)")
@@ -152,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"state written to {args.state} ({len(state['findings'])} findings)")
     else:
         print("no change; nothing committed")
-    _emit_github_output("changed", "true" if changed else "false")
+    _emit_github_output("state_changed", "true" if changed else "false")
     return 0
 
 

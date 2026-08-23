@@ -171,9 +171,12 @@ jobs:
           fi
 
       - name: Commit the updated state file
-        if: steps.state.outputs.changed == 'true'
+        if: steps.state.outputs.state_changed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW: ${{ steps.state.outputs.new }}
+          RESOLVED: ${{ steps.state.outputs.resolved }}
+          SCAN_DATE: ${{ steps.state.outputs.scan_date }}
         run: |
           set -euo pipefail
 
@@ -188,8 +191,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # The document can change without any finding changing: last_seen
+          # advances on every scan, which is the information the audit trail
+          # exists to carry. Say so plainly rather than implying a finding moved.
+          if [ "${NEW}" -gt 0 ] || [ "${RESOLVED}" -gt 0 ]; then
+            message="Vulnerability state: ${NEW} new, ${RESOLVED} resolved [skip ci]"
+          else
+            message="Vulnerability state: no change (scan of ${SCAN_DATE}) [skip ci]"
+          fi
+
+          # [skip ci] is redundant while the default GITHUB_TOKEN is in use,
+          # since its commits do not trigger workflows. It is what stops the
+          # loop if anyone ever swaps in a PAT.
           git add .sbom-watchdog/findings.json
-          git commit -m "Update vulnerability state" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
+          git commit -m "${message}" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
 
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Rebase first: a concurrent run on the same ref would otherwise make
@@ -198,7 +213,7 @@ jobs:
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Report that nothing changed
-        if: steps.state.outputs.changed != 'true'
+        if: steps.state.outputs.state_changed != 'true'
         run: echo "no change; nothing committed"
 
       - name: Upload SBOM and scan output
