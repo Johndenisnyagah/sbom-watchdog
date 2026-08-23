@@ -9,10 +9,17 @@ Every test writes through tmp_path. Nothing here touches .sbom-watchdog/.
 import json
 import pathlib
 
+import re
+
 from src.diff import diff, select_for_issues
 from src.model import parse_grype
-from src.run import main
-from src.state import state_documents_equal
+from src.run import commit_message, main
+from src.state import (
+    findings_from_state,
+    state_documents_equal,
+    state_from_findings,
+    utc_now,
+)
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 REAL = FIXTURES / "grype" / "real_0117.json"
@@ -174,3 +181,78 @@ def test_state_documents_equal_treats_a_missing_document_as_different(tmp_path):
     a = document(FIXTURES / "state" / "baseline.json")
     assert not state_documents_equal(None, a)
     assert state_documents_equal(None, None)
+
+
+# --- the commit message ---------------------------------------------------
+#
+# This text is permanent in somebody's history. A real baseline once shipped as
+# "no change (scan of )" - wrong branch, empty date - because it was assembled
+# from step outputs in workflow shell. These are the tests that stop that twice.
+
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def build(previous_state, scan_name):
+    """(DiffResult, state document) for a scan against an optional prior state."""
+    report = json.loads((FIXTURES / "grype" / scan_name).read_text(encoding="utf-8"))
+    current = parse_grype(report)
+    previous = None if previous_state is None else findings_from_state(previous_state)
+    result = diff(previous, current)
+    from src.run import findings_to_record
+    state = state_from_findings(
+        findings_to_record(result), provenance={}, generated_at=utc_now(), tooling={}
+    )
+    return result, state
+
+
+def test_commit_message_bootstrap_names_the_baseline():
+    result, state = build(None, "real_0117.json")
+    assert commit_message(result, state) == (
+        "Vulnerability state: baseline, 22 findings recorded [skip ci]"
+    )
+
+
+def test_commit_message_reports_new_and_resolved_counts():
+    previous = document(FIXTURES / "state" / "baseline.json")
+    result, state = build(previous, "02_new_finding.json")
+    assert commit_message(result, state) == (
+        "Vulnerability state: 1 new, 0 resolved [skip ci]"
+    )
+
+
+def test_commit_message_no_change_carries_a_real_date():
+    """The empty date is what shipped. A message may never say "scan of )"."""
+    previous = document(FIXTURES / "state" / "baseline.json")
+    result, state = build(previous, "01_baseline.json")
+    message = commit_message(result, state)
+
+    assert message.startswith("Vulnerability state: no change (scan of ")
+    assert "scan of )" not in message
+
+    scanned = re.search(r"scan of (\S+)\)", message)
+    assert scanned, message
+    assert DATE.match(scanned.group(1)), f"not a YYYY-MM-DD date: {scanned.group(1)!r}"
+
+
+def test_commit_message_after_a_recompute_is_still_correct(tmp_path):
+    """The race path recomputes against whatever origin holds and rewrites the
+    message. A stale or empty message there would mislabel the commit that
+    actually lands."""
+    state_path = tmp_path / "findings.json"
+    message_path = tmp_path / "commit-message.txt"
+
+    assert main(["--scan", str(REAL), "--state", str(state_path),
+                 "--write-state", "--message-file", str(message_path)]) == 0
+    assert message_path.read_text(encoding="utf-8").strip() == (
+        "Vulnerability state: baseline, 22 findings recorded [skip ci]"
+    )
+
+    # Recompute against the state just written, as the retry loop does.
+    assert main(["--scan", str(REAL), "--state", str(state_path),
+                 "--write-state", "--message-file", str(message_path)]) == 0
+    message = message_path.read_text(encoding="utf-8").strip()
+
+    assert message.startswith("Vulnerability state: no change (scan of ")
+    assert "scan of )" not in message
+    scanned = re.search(r"scan of (\S+)\)", message)
+    assert scanned and DATE.match(scanned.group(1))

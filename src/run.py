@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 from .diff import DiffResult, diff, select_for_issues
+from .issues import dry_run
 from .model import Finding, parse_grype
 from .state import (
     findings_from_state,
@@ -124,6 +125,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", default=None,
                         help="path to write the updated state document to; "
                              "not used with --write-state")
+    parser.add_argument("--dry-run-issues", action="store_true",
+                        help="render the issues that would be filed and print "
+                             "them; posts nothing")
     parser.add_argument("--message-file", default=None,
                         help="path to write the commit message to, for the "
                              "commit-back step to read")
@@ -152,6 +156,11 @@ def main(argv: list[str] | None = None) -> int:
 
     result = diff(previous, current)
     print(summarise(result, args.threshold, args.scan))
+
+    if args.dry_run_issues:
+        print()
+        print(dry_run(select_for_issues(result, threshold=args.threshold)))
+        print()
 
     # One timestamp for the whole run: state_from_findings derives both dates
     # from it, so a second clock call either side of midnight UTC cannot write
