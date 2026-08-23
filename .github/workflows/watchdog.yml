@@ -44,20 +44,55 @@ jobs:
       - name: Run the test suite
         run: python -m pytest -q
 
-      - name: Install Syft ${{ env.SYFT_VERSION }}
+      # Anchore's install.sh is deliberately not used. It took a 302 from
+      # GitHub's asset CDN (release-assets.githubusercontent.com) as an error
+      # rather than following it, so the checksum and tar steps then ran
+      # against a file that was never downloaded. Fetching the tarball directly
+      # puts our own curl flags in charge of redirect handling, and removes a
+      # script that moves independently of the tag we pinned.
+      - name: Install and verify Syft and Grype
         run: |
-          curl -sSfL "https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh" \
-            | sh -s -- -b "$RUNNER_TEMP/bin" "${SYFT_VERSION}"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
 
-      - name: Install Grype ${{ env.GRYPE_VERSION }}
-        run: |
-          curl -sSfL "https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh" \
-            | sh -s -- -b "$RUNNER_TEMP/bin" "${GRYPE_VERSION}"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          # A daily job should survive one bad response from a CDN without
+          # filing a red run.
+          retry() {
+            local attempt=1
+            until "$@"; do
+              if [ "$attempt" -ge 3 ]; then
+                echo "::error::failed after 3 attempts: $*"
+                return 1
+              fi
+              echo "attempt ${attempt} failed, retrying in 5s: $*"
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+          }
 
-      - name: Report tool versions
-        run: |
+          install_tool() {
+            local name="$1" version="$2"
+            local tarball="${name}_${version}_linux_amd64.tar.gz"
+            local checksums="${name}_${version}_checksums.txt"
+            local base="https://github.com/anchore/${name}/releases/download/v${version}"
+            local work
+            work="$(mktemp -d)"
+
+            retry curl -fsSL -o "${work}/${tarball}" "${base}/${tarball}"
+            retry curl -fsSL -o "${work}/${checksums}" "${base}/${checksums}"
+
+            # Grep the single line first. `sha256sum -c` over the whole file
+            # would need --ignore-missing, which passes vacuously when the
+            # download produced nothing — exactly the failure being fixed here.
+            ( cd "${work}" && grep " ${tarball}$" "${checksums}" | sha256sum -c - )
+
+            tar -xzf "${work}/${tarball}" -C "${work}" "${name}"
+            sudo install -m 0755 "${work}/${name}" "/usr/local/bin/${name}"
+            rm -rf "${work}"
+          }
+
+          install_tool syft "${SYFT_VERSION#v}"
+          install_tool grype "${GRYPE_VERSION#v}"
+
           syft version
           grype version
 
