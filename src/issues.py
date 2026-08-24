@@ -29,6 +29,8 @@ from .model import Finding
 __all__ = [
     "GitHubError",
     "advisory_url",
+    "close_comment",
+    "close_issue",
     "create_issue",
     "dry_run",
     "ensure_labels",
@@ -145,7 +147,8 @@ def fix_line(finding: Finding) -> str:
     return "**Fixed in:** no fixed version has been published yet."
 
 
-def render_issue(finding: Finding, findings=None) -> tuple[str, str, list[str]]:
+def render_issue(finding: Finding, findings=None,
+                 previous=None) -> tuple[str, str, list[str]]:
     """Render a finding as (title, body, labels).
 
     `findings` is every finding in the current scan, not just the ones being
@@ -164,6 +167,18 @@ def render_issue(finding: Finding, findings=None) -> tuple[str, str, list[str]]:
              f"[{finding.key}]")
 
     versions = ", ".join(finding.versions) if finding.versions else "unknown"
+
+    # A finding that was resolved and has come back is a regression. Saying so,
+    # and naming the issue it was filed under last time, is the difference
+    # between "here is a new CVE" and "the fix you applied did not hold".
+    regression = ""
+    previous = previous or {}
+    if previous.get("resolved_on") and previous.get("issue_number"):
+        regression = (
+            f"This finding was previously reported in #{previous['issue_number']} "
+            f"and resolved on {previous['resolved_on']}. It has returned."
+            + chr(10) * 2
+        )
 
     siblings = package_findings(finding, findings)
     guidance = [fix_line(finding)]
@@ -190,7 +205,7 @@ def render_issue(finding: Finding, findings=None) -> tuple[str, str, list[str]]:
             links.append(f"- [{identifier}]({url})")
     advisories = "\n".join(links) if links else "- none published"
 
-    body = f"""`{finding.package_name}` {versions} is affected by {finding.id}.
+    body = f"""{regression}`{finding.package_name}` {versions} is affected by {finding.id}.
 
 | | |
 | --- | --- |
@@ -223,14 +238,15 @@ refiles it.
     return title, body, labels
 
 
-def dry_run(selected: list[Finding], findings=None) -> str:
+def dry_run(selected: list[Finding], findings=None, provenance=None) -> str:
     """What would be posted, as text. Posts nothing."""
     if not selected:
         return "no issues would be filed"
 
     blocks = [f"{len(selected)} issue(s) would be filed. Nothing was posted.\n"]
     for index, finding in enumerate(selected, start=1):
-        title, body, labels = render_issue(finding, findings)
+        title, body, labels = render_issue(
+            finding, findings, (provenance or {}).get(finding.key))
         blocks.append(
             f"{'=' * 72}\n"
             f"ISSUE {index} of {len(selected)}\n"
@@ -376,6 +392,12 @@ def find_existing_issue(repo: str, key: str, token: str) -> int | None:
     run created issues and then failed before committing state, the numbers are
     lost from state but the issues exist. Searching by key finds them.
 
+    Only an OPEN issue counts. A closed one means the finding was resolved and
+    the issue dealt with; if the finding is being filed again the vulnerability
+    has returned, and treating the closed issue as evidence of prior filing
+    would swallow the regression silently. Missing a returning vulnerability is
+    the one direction this tool must not fail in.
+
     Caveat worth knowing: GitHub's search index is eventually consistent, so an
     issue created seconds ago may not come back. This narrows the window for
     duplicates across runs; the within-run window is closed by the caller
@@ -383,9 +405,12 @@ def find_existing_issue(repo: str, key: str, token: str) -> int | None:
     """
     response = _request(
         "GET", f"{API_ROOT}/search/issues", token, expect=(200,),
-        params={"q": f'repo:{repo} is:issue in:title "{key}"', "per_page": 20},
+        params={"q": f'repo:{repo} is:issue is:open in:title "{key}"',
+                "per_page": 20},
     )
     for item in response.json().get("items", []):
+        if item.get("state") not in (None, "open"):
+            continue
         if key in (item.get("title") or ""):
             return item.get("number")
     return None
@@ -454,3 +479,41 @@ def create_issue(repo: str, title: str, body: str, labels: list[str],
         payload={"title": title, "body": body, "labels": labels},
     )
     return int(response.json()["number"])
+
+
+def close_comment(finding: Finding, installed: str | None = None) -> str:
+    """What to say when closing. The reason belongs in the tracker, not only in
+    a state file nobody reads."""
+    lines = [
+        (f"`{finding.package_name}` is no longer reported as affected by "
+         f"{finding.id}, so this finding is resolved."),
+    ]
+    if installed:
+        lines.append(f"The scan now sees `{finding.package_name}` {installed}.")
+    elif finding.fixed_in:
+        fixed = highest_version(finding.fixed_in)
+        lines.append(f"A fix for this was published in {fixed}.")
+    lines.append(
+        "Closed automatically by "
+        "[sbom-watchdog](https://github.com/Johndenisnyagah/sbom-watchdog). "
+        "If the vulnerability returns, a new issue will be filed referencing "
+        "this one."
+    )
+    return (chr(10) + chr(10)).join(lines)
+
+
+def close_issue(repo: str, number: int, comment: str, token: str) -> None:
+    """Comment, then close.
+
+    The comment goes first deliberately. If the close fails afterwards the
+    issue is still annotated with why it was going to be closed, which a person
+    can act on; a silent close with no reason is worse than an open issue.
+    """
+    _request(
+        "POST", f"{API_ROOT}/repos/{repo}/issues/{number}/comments", token,
+        expect=(201,), payload={"body": comment},
+    )
+    _request(
+        "PATCH", f"{API_ROOT}/repos/{repo}/issues/{number}", token,
+        expect=(200,), payload={"state": "closed", "state_reason": "completed"},
+    )

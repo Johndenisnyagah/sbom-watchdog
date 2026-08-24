@@ -22,6 +22,8 @@ from pathlib import Path
 
 from .diff import DiffResult, diff, select_for_issues
 from .issues import (
+    close_comment,
+    close_issue,
     create_issue,
     dry_run,
     ensure_labels,
@@ -33,6 +35,7 @@ from .state import (
     findings_from_state,
     load_state,
     provenance_from_state,
+    resolved_from_state,
     save_state,
     state_documents_equal,
     state_from_findings,
@@ -109,7 +112,8 @@ def file_issues(selected, repo: str, token: str, provenance: dict,
                 filed[finding.key] = existing
                 continue
 
-            title, body, labels = render_issue(finding, findings)
+            title, body, labels = render_issue(
+                finding, findings, provenance.get(finding.key))
             # ensure_labels returns only what can actually be applied; a token
             # without label permission still gets the issue filed.
             usable = ensure_labels(repo, labels, token)
@@ -124,6 +128,36 @@ def file_issues(selected, repo: str, token: str, provenance: dict,
     except Exception as exc:  # noqa: BLE001
         return filed, exc
     return filed, None
+
+
+def close_resolved_issues(result: DiffResult, current, repo: str, token: str,
+                          provenance: dict) -> int:
+    """Close the issues of findings that are no longer reported.
+
+    A close failure never fails the run. The state write matters more: a stale
+    open issue is visible and recoverable, where a lost issue number is not.
+    """
+    closed = 0
+    for key, finding in result.resolved.items():
+        number = (provenance.get(key) or {}).get("issue_number")
+        if not number:
+            continue
+
+        # If the package still appears in the scan, say which version is now
+        # installed. A fully resolved package has no findings left to ask.
+        installed = next(
+            (", ".join(other.versions) for other in current.values()
+             if other.package_name == finding.package_name
+             and other.package_type == finding.package_type),
+            None,
+        )
+        try:
+            close_issue(repo, number, close_comment(finding, installed), token)
+            print(f"  closed #{number} for {key}")
+            closed += 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"  could not close #{number} for {key}: {exc}")
+    return closed
 
 
 def commit_message(result: DiffResult, state: dict) -> str:
@@ -232,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
     previous_state = load_state(args.state)
     previous = None if previous_state is None else findings_from_state(previous_state)
     provenance = {} if previous_state is None else provenance_from_state(previous_state)
+    previously_resolved = (
+        {} if previous_state is None else resolved_from_state(previous_state))
 
     result = diff(previous, current)
     print(summarise(result, args.threshold, args.scan))
@@ -239,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run_issues:
         print()
         _print(dry_run(select_for_issues(result, threshold=args.threshold),
-                      current))
+                      current, provenance))
         print()
 
     filing_error = None
@@ -257,14 +293,26 @@ def main(argv: list[str] | None = None) -> int:
                                           provenance, current)
         print(f"recorded {len(filed)} issue number(s) into state")
 
+        if result.resolved:
+            closed = close_resolved_issues(result, current, args.repo, token,
+                                           provenance)
+            print(f"closed {closed} issue(s) for resolved findings")
+
     # One timestamp for the whole run: state_from_findings derives both dates
     # from it, so a second clock call either side of midnight UTC cannot write
     # a record first seen after it was last seen.
+    # Previously-resolved records stay in the document, joined by whatever
+    # resolved on this run. A record present again is current, not resolved:
+    # state_from_findings drops it from the resolved set for us.
+    resolved = dict(previously_resolved)
+    resolved.update(result.resolved)
+
     state = state_from_findings(
         findings_to_record(result),
         provenance=provenance,
         generated_at=utc_now(),
         tooling=tooling_from_grype(report, syft_version=args.syft_version),
+        resolved=resolved,
     )
     # The workflow builds its commit message from these rather than parsing
     # anything back out of the document.

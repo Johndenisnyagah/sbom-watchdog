@@ -6,7 +6,7 @@ This file is the contract. When something here conflicts with a suggestion made 
 
 ## Current phase
 
-Step 5 is wired and the issue bodies have been read at volume. `render_issue` takes the whole scan so every issue for a package names the same highest fix, flags a major-version jump, and no longer claims a closed issue would be refiled. Previously: step 5 is wired: the workflow holds `contents: write` and `issues: write`, passes `--repo` from `github.repository` and the token through the environment, and takes a `dry_run` boolean input defaulting to true, so a first dispatch prints what it would file rather than filing it. Anything other than an explicit `false` selects the dry run. Nothing has been installed in the testbed at https://github.com/Johndenisnyagah/watchdog-testbed yet; that is the next step. Previously: step 5 part 1, standard library only: `issues.py` renders a finding as (title, body, labels) and carries `find_existing_issue`, `create_issue` and `ensure_labels` over `urllib.request`. `run.py --file-issues` needs `--repo` and `GITHUB_TOKEN` and is mutually exclusive with `--dry-run-issues`; it updates provenance in place as each number is obtained, which closes the within-run duplicate window and means a partial failure still writes what it collected. Nothing calls it yet: the workflow is untouched and has no `issues: write`. Previously: `issues.py` renders a finding as (title, body, labels), and carries `find_existing_issue`, `create_issue` and `ensure_labels` behind a lazy `requests` import, so rendering and `--dry-run-issues` work without it. `run.py --file-issues` needs `--repo` and `GITHUB_TOKEN` and is mutually exclusive with `--dry-run-issues`; it writes issue numbers into provenance before the state document is built, and writes state even when filing fails partway. Nothing calls it yet: the workflow is untouched and has no `issues: write`. Previously: step 5 part 1: `issues.py` renders a finding as (title, body, labels) and prints what it would post. `run.py --dry-run-issues` drives it. No GitHub API, no `issues: write`, no workflow change; the API is part 2. Previously: step 4 is done. The workflow reads committed state, diffs, writes back, survives a concurrent run and commits only when something changed. Proven on runners: two runs dispatched 41 seconds apart at the same pinned SHA produced exactly one baseline commit, the second syncing the first's state and skipping its commit step. Previously: step 4 part 2: `run.py` gained `--write-state`, which updates the state file in place and only when the document actually changed. The workflow now holds `contents: write`, is serialised with `concurrency`, and commits `.sbom-watchdog/findings.json` as github-actions[bot], rebasing before it pushes. Issue creation is still not built; that is part 3 and needs `issues: write`. `tests/test_run.py` covers bootstrap, idempotency, provenance carry-forward and the reconciled-key case. Previously: step 4 part 1: `src/run.py` wires parse, load, diff and save together, takes every path as an argument, prints a summary and writes the next state document. It files no issues and commits nothing. The workflow runs it after the scan and uploads the state document it *would* write as an artifact, still under `contents: read`. Step 3 is complete: `.github/workflows/watchdog.yml` exists, `workflow_dispatch` only, `contents: read` only. It installs pinned Syft 1.51.0 and Grype 0.117.0, runs the suite, produces an SBOM and a scan, validates the Grype document has a `matches` key, and uploads both as artifacts. It deliberately does not diff, write state, file issues or commit. Scanning this repo yields three components and no findings — the toolchain is what is being proved, not the scanner. Steps 1 and 2 are complete and all 38 tests pass. `issues.py` and `report.py` are still empty. Nothing has been granted `contents: write` or `issues: write`.
+Schema 2: resolved findings stay in the state document with `resolved_on`, their issues are closed with a comment, and a finding that returns is reported as new and references the issue it was filed under. Previously: step 5 is wired and the issue bodies have been read at volume. `render_issue` takes the whole scan so every issue for a package names the same highest fix, flags a major-version jump, and no longer claims a closed issue would be refiled. Previously: step 5 is wired: the workflow holds `contents: write` and `issues: write`, passes `--repo` from `github.repository` and the token through the environment, and takes a `dry_run` boolean input defaulting to true, so a first dispatch prints what it would file rather than filing it. Anything other than an explicit `false` selects the dry run. Nothing has been installed in the testbed at https://github.com/Johndenisnyagah/watchdog-testbed yet; that is the next step. Previously: step 5 part 1, standard library only: `issues.py` renders a finding as (title, body, labels) and carries `find_existing_issue`, `create_issue` and `ensure_labels` over `urllib.request`. `run.py --file-issues` needs `--repo` and `GITHUB_TOKEN` and is mutually exclusive with `--dry-run-issues`; it updates provenance in place as each number is obtained, which closes the within-run duplicate window and means a partial failure still writes what it collected. Nothing calls it yet: the workflow is untouched and has no `issues: write`. Previously: `issues.py` renders a finding as (title, body, labels), and carries `find_existing_issue`, `create_issue` and `ensure_labels` behind a lazy `requests` import, so rendering and `--dry-run-issues` work without it. `run.py --file-issues` needs `--repo` and `GITHUB_TOKEN` and is mutually exclusive with `--dry-run-issues`; it writes issue numbers into provenance before the state document is built, and writes state even when filing fails partway. Nothing calls it yet: the workflow is untouched and has no `issues: write`. Previously: step 5 part 1: `issues.py` renders a finding as (title, body, labels) and prints what it would post. `run.py --dry-run-issues` drives it. No GitHub API, no `issues: write`, no workflow change; the API is part 2. Previously: step 4 is done. The workflow reads committed state, diffs, writes back, survives a concurrent run and commits only when something changed. Proven on runners: two runs dispatched 41 seconds apart at the same pinned SHA produced exactly one baseline commit, the second syncing the first's state and skipping its commit step. Previously: step 4 part 2: `run.py` gained `--write-state`, which updates the state file in place and only when the document actually changed. The workflow now holds `contents: write`, is serialised with `concurrency`, and commits `.sbom-watchdog/findings.json` as github-actions[bot], rebasing before it pushes. Issue creation is still not built; that is part 3 and needs `issues: write`. `tests/test_run.py` covers bootstrap, idempotency, provenance carry-forward and the reconciled-key case. Previously: step 4 part 1: `src/run.py` wires parse, load, diff and save together, takes every path as an argument, prints a summary and writes the next state document. It files no issues and commits nothing. The workflow runs it after the scan and uploads the state document it *would* write as an artifact, still under `contents: read`. Step 3 is complete: `.github/workflows/watchdog.yml` exists, `workflow_dispatch` only, `contents: read` only. It installs pinned Syft 1.51.0 and Grype 0.117.0, runs the suite, produces an SBOM and a scan, validates the Grype document has a `matches` key, and uploads both as artifacts. It deliberately does not diff, write state, file issues or commit. Scanning this repo yields three components and no findings — the toolchain is what is being proved, not the scanner. Steps 1 and 2 are complete and all 38 tests pass. `issues.py` and `report.py` are still empty. Nothing has been granted `contents: write` or `issues: write`.
 
 Step numbers refer to the build order below, not to the six phases in the original project brief. The two do not line up, and the build order governs.
 
@@ -65,7 +65,7 @@ Path: `.sbom-watchdog/findings.json`, committed to the repository. Committing is
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_at": "2026-08-21T03:00:00Z",
   "tooling": {
     "syft": "1.51.0",
@@ -87,7 +87,8 @@ Path: `.sbom-watchdog/findings.json`, committed to the repository. Committing is
       "fix_state": "fixed",
       "first_seen": "2026-08-01",
       "last_seen": "2026-08-21",
-      "issue_number": 42
+      "issue_number": 42,
+      "resolved_on": null
     }
   }
 }
@@ -123,6 +124,12 @@ That means a repo with any findings commits once a day, because `last_seen` adva
 
 The message carries the signal, in three forms: `baseline, N findings recorded` on a first run, `N new, M resolved` when findings moved, and `no change (scan of YYYY-MM-DD)` when only the scan date did. Bootstrap is checked first and is not optional. A first run reports zero new by design, so without its own branch a baseline would be committed as "no change" - a two hundred finding inventory announced as nothing having happened. That commit is permanent, and it is the first thing someone reads when deciding whether to trust the tool. It is how a security tool gets uninstalled on day one. Both carry `[skip ci]`, which is redundant while the default `GITHUB_TOKEN` is in use — its commits do not trigger workflows — but is what prevents a loop if a PAT is ever swapped in.
 
+Resolved findings are **not** deleted. They stay in the document with `resolved_on` set. The earlier rule — drop them, git history preserves them — is withdrawn: git history can tell you a finding was resolved but not which issue it was, and reconstructing that means diffing two commits of a file nobody reads that way. The record is the only link between a finding and the issue it was filed under. Delete it and nothing can close that issue, or reference it if the vulnerability returns.
+
+A resolved record is not currently present, so `findings_from_state` excludes it and `resolved_from_state` returns it separately. A finding with `resolved_on` that reappears in a scan is therefore absent from `previous` and lands in `new`, which is correct: that is a regression, and it is louder than an unchanged finding deliberately. Its `issue_number` and `first_seen` carry forward through provenance, so the new issue can reference the old one, and its `last_seen` stays at the day it was last actually seen.
+
+Schema 2 does exactly that. `migrate` upgrades a v1 document by adding `resolved_on: null` to every record: v1 deleted resolved findings, so everything a v1 file carries is currently present and nothing is inferred.
+
 Bump `schema_version` on any shape change and write a migration in `state.py`. Never silently reinterpret an old file.
 
 ## Three behaviours that must not regress
@@ -130,6 +137,10 @@ Bump `schema_version` on any shape change and write a migration in `state.py`. N
 **Bootstrap.** If the state file is absent, the run records the baseline, files zero issues, and logs the count. Without this, the first run against a real project opens several hundred issues at once.
 
 **Severity is recorded, not filtered, at state level.** Every finding Grype reports goes into the state file regardless of severity. The threshold applies only when deciding what to file an issue about. If low-severity findings were dropped from state, a Medium later re-rated to Critical by NVD would look brand new, and the audit trail would have a hole in it.
+
+**A resolved finding gets its issue closed.** `issues.py` posts a comment naming why, then PATCHes the issue closed. A close failure never fails the run: the state write matters more, because a stale open issue is visible and recoverable where a lost issue number is not.
+
+**Only an open issue counts as prior filing.** `find_existing_issue` asks for `is:open`. A closed issue means the finding was resolved and dealt with; if it is being filed again the vulnerability has returned, and treating the closed issue as evidence would swallow the regression. Missing a returning vulnerability is the one direction this tool must not fail in.
 
 **Ordering under partial failure.** Scan, diff, create issues, write issue numbers into state, commit. If the commit fails after issues are created, the next run refiles them. The cheap safety net is putting the finding key in the issue title and doing one `GET /search/issues` before creating.
 
@@ -155,8 +166,8 @@ nothing hardcodes `.sbom-watchdog/findings.json`: the workflow passes it and
 the tests point somewhere else. It writes the state document from the diff
 result rather than from the parsed scan, because reconciliation moves a
 finding back to the key it was first filed under and that key is what
-`first_seen` and `issue_number` hang off. Resolved findings are dropped from
-the new state; git history is what preserves them.
+`first_seen` and `issue_number` hang off. Resolved findings stay in the new
+state with a `resolved_on` date.
 
 `diff.py` imports from `model.py` only. It does not touch the filesystem, the network, the clock, or `os.environ`. Everything it needs arrives as an argument. This is what makes the fixture tests possible, and it is the constraint most likely to get quietly violated when wiring up phase 4.
 
@@ -179,10 +190,13 @@ class Finding:
 def parse_grype(report: dict) -> dict[str, Finding]: ...
 
 # state.py
+def migrate(state: dict) -> dict: ...            # v1 -> v2, never in place
 def provenance_from_state(state: dict) -> dict[str, dict]: ...
-def findings_from_state(state: dict) -> dict[str, Finding]: ...
+def findings_from_state(state: dict) -> dict[str, Finding]: ...    # unresolved
+def resolved_from_state(state: dict) -> dict[str, Finding]: ...    # resolved
 def state_from_findings(findings: dict[str, Finding], *, provenance: dict,
-                        generated_at: str, tooling: dict) -> dict: ...
+                        generated_at: str, tooling: dict,
+                        resolved: dict[str, Finding] | None = None) -> dict: ...
 def load_state(path) -> dict | None: ...      # None when the file is absent
 def save_state(path, state: dict) -> None: ...
 def utc_now() -> str: ...                     # ISO 8601, trailing Z
@@ -191,7 +205,8 @@ def tooling_from_grype(report: dict,
 def state_documents_equal(previous: dict | None, current: dict | None, *,
                           ignore: tuple[str, ...] = ("generated_at",)) -> bool: ...
 
-# provenance maps finding key -> {"first_seen": str, "issue_number": int|None}.
+# provenance maps finding key -> {"first_seen", "last_seen", "issue_number",
+# "resolved_on"}.
 # Phase 4 mutates that dict after filing issues, then serialises once.
 #
 # Timestamp formatting lives with the serialiser: leaving the orchestrator to

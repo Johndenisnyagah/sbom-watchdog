@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_at": "2026-08-20T03:00:00Z",
   "tooling": {
     "syft": "1.51.0",
@@ -27,7 +27,8 @@
       "fix_state": "fixed",
       "first_seen": "2026-08-01",
       "last_seen": "2026-08-20",
-      "issue_number": 42
+      "issue_number": 42,
+      "resolved_on": null
     },
     "CVE-2018-18074::python::requests": {
       "id": "CVE-2018-18074",
@@ -49,7 +50,8 @@
       "fix_state": "fixed",
       "first_seen": "2026-08-01",
       "last_seen": "2026-08-20",
-      "issue_number": 43
+      "issue_number": 43,
+      "resolved_on": null
     },
     "CVE-2022-40897::python::setuptools": {
       "id": "CVE-2022-40897",
@@ -71,7 +73,8 @@
       "fix_state": "fixed",
       "first_seen": "2026-08-01",
       "last_seen": "2026-08-20",
-      "issue_number": null
+      "issue_number": null,
+      "resolved_on": null
     }
   }
 }

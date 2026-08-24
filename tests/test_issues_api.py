@@ -20,7 +20,13 @@ from email.message import Message
 
 import pytest
 
-from src.issues import GitHubError, create_issue, ensure_labels, find_existing_issue
+from src.issues import (
+    GitHubError,
+    close_issue,
+    create_issue,
+    ensure_labels,
+    find_existing_issue,
+)
 
 TOKEN = "ghs_test_token"
 REPO = "owner/name"
@@ -362,3 +368,64 @@ def test_the_error_carries_the_response_body(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Validation Failed"):
         create_issue(REPO, "t", "b", [], TOKEN)
+
+
+# --- only an open issue counts as prior filing ----------------------------
+
+def test_find_existing_issue_asks_for_open_issues_only(monkeypatch):
+    fake = transport(monkeypatch, Ok(200, {"items": []}))
+    find_existing_issue(REPO, "CVE-1::python::x", TOKEN)
+    assert "is%3Aopen" in fake.requests[0].full_url
+
+
+def test_a_closed_issue_is_not_evidence_of_prior_filing(monkeypatch):
+    """A closed issue means the finding was resolved and dealt with. If it is
+    being filed again the vulnerability has returned, and treating the closed
+    issue as prior filing swallows the regression silently."""
+    key = "CVE-2023-45803::python::urllib3"
+    transport(monkeypatch, Ok(200, {
+        "items": [{"number": 45, "state": "closed",
+                   "title": f"High: CVE-2023-45803 in urllib3 [{key}]"}]
+    }))
+
+    assert find_existing_issue(REPO, key, TOKEN) is None
+
+
+def test_an_open_issue_is_still_evidence(monkeypatch):
+    key = "CVE-2023-45803::python::urllib3"
+    transport(monkeypatch, Ok(200, {
+        "items": [{"number": 45, "state": "open",
+                   "title": f"High: CVE-2023-45803 in urllib3 [{key}]"}]
+    }))
+
+    assert find_existing_issue(REPO, key, TOKEN) == 45
+
+
+# --- closing --------------------------------------------------------------
+
+def test_close_issue_comments_then_closes(monkeypatch):
+    """The comment goes first. A close that succeeds after a failed comment is
+    a silent close; a comment that survives a failed close is actionable."""
+    fake = transport(monkeypatch, Ok(201, {"id": 1}), Ok(200, {"number": 3}))
+
+    close_issue(REPO, 3, "it is fixed", TOKEN)
+
+    assert fake.call_count == 2
+    comment, close = fake.requests
+    assert comment.get_method() == "POST"
+    assert comment.full_url.endswith("/repos/owner/name/issues/3/comments")
+    assert body_of(comment) == {"body": "it is fixed"}
+
+    assert close.get_method() == "PATCH"
+    assert close.full_url.endswith("/repos/owner/name/issues/3")
+    assert body_of(close) == {"state": "closed", "state_reason": "completed"}
+
+
+def test_close_issue_raises_when_the_close_fails(monkeypatch):
+    """run.py swallows this so the state write still happens; the API layer
+    must still report it rather than pretending."""
+    transport(monkeypatch, Ok(201, {"id": 1}), fail(404, {}, {"message": "Not Found"}))
+
+    with pytest.raises(GitHubError) as caught:
+        close_issue(REPO, 3, "it is fixed", TOKEN)
+    assert caught.value.status == 404

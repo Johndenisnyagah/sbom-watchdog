@@ -151,7 +151,7 @@ for name, payload in files.items():
 
 
 def finding(key, vid, aliases, name, ptype, versions, severity, fixed_in,
-            first_seen, last_seen, issue_number=None):
+            first_seen, last_seen, issue_number=None, resolved_on=None):
     # aliases is the full identifier set for this finding, canonical id included.
     return key, {
         "id": vid,
@@ -163,12 +163,15 @@ def finding(key, vid, aliases, name, ptype, versions, severity, fixed_in,
         "first_seen": first_seen,
         "last_seen": last_seen,
         "issue_number": issue_number,
+        # schema 2: a resolved finding stays in the document rather than being
+        # deleted, so the link to the issue it was filed under survives.
+        "resolved_on": resolved_on,
     }
 
 
 def state(findings, generated="2026-08-20T03:00:00Z"):
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": generated,
         "tooling": {
             "syft": "1.51.0",
@@ -213,4 +216,16 @@ ghsa_only = baseline_findings + [
 (STATE / "ghsa_only.json").write_text(
     json.dumps(state(ghsa_only), indent=2) + "\n")
 
-print(f"wrote {len(files)} grype fixtures and 3 state fixtures")
+# A resolved record, so the reader has something to reload and the diff has a
+# regression to detect if the finding comes back.
+with_resolved = baseline_findings + [
+    finding("CVE-2023-45803::python::urllib3", "CVE-2023-45803",
+            ["GHSA-v845-jxx5-vc9f"], "urllib3", "python", ["1.26.17"],
+            "High", ["1.26.18", "2.0.7"], "2026-08-01", "2026-08-19",
+            issue_number=45, resolved_on="2026-08-20"),
+]
+(STATE / "with_resolved.json").write_text(
+    json.dumps(state(with_resolved), indent=2) + "\n"
+)
+
+print(f"wrote {len(files)} grype fixtures and 4 state fixtures")

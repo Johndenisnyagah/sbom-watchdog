@@ -14,7 +14,10 @@ from src.diff import diff, select_for_issues
 from src.model import parse_grype
 from src.run import commit_message, main
 from src.state import (
+    SCHEMA_VERSION,
     findings_from_state,
+    migrate,
+    resolved_from_state,
     state_documents_equal,
     state_from_findings,
     utc_now,
@@ -310,3 +313,135 @@ def test_a_real_run_still_writes_state(tmp_path):
                  "--write-state"]) == 0
     assert state.exists()
     assert len(document(state)["findings"]) == 22
+
+
+# --- schema 2: resolved findings stay ------------------------------------
+#
+# v1 deleted a resolved finding, which discarded the only link between it and
+# the issue it was filed under. Nothing could then close that issue, or
+# reference it if the vulnerability came back.
+
+def test_v1_documents_migrate_and_are_all_unresolved():
+    v1 = {
+        "schema_version": 1,
+        "generated_at": "2026-08-20T03:00:00Z",
+        "tooling": {},
+        "findings": {
+            "CVE-1::python::x": {
+                "id": "CVE-1", "aliases": ["CVE-1"],
+                "package": {"name": "x", "type": "python", "versions": ["1.0"]},
+                "severity": "High", "fixed_in": ["2.0"], "fix_state": "fixed",
+                "first_seen": "2026-08-01", "last_seen": "2026-08-20",
+                "issue_number": 7,
+            }
+        },
+    }
+    upgraded = migrate(v1)
+
+    assert upgraded["schema_version"] == SCHEMA_VERSION
+    assert findings_from_state(v1).keys() == {"CVE-1::python::x"}
+    assert resolved_from_state(v1) == {}
+    assert v1["schema_version"] == 1, "migrate mutated its argument"
+
+
+def test_resolved_records_are_not_returned_as_current():
+    state = document(FIXTURES / "state" / "with_resolved.json")
+    key = "CVE-2023-45803::python::urllib3"
+
+    assert key not in findings_from_state(state)
+    assert key in resolved_from_state(state)
+
+
+def test_resolved_records_survive_a_write(tmp_path):
+    """The record, and with it the issue number, must still be there next run."""
+    state = document(FIXTURES / "state" / "with_resolved.json")
+    key = "CVE-2023-45803::python::urllib3"
+
+    rebuilt = state_from_findings(
+        findings_from_state(state),
+        provenance=provenance_of(state),
+        generated_at=utc_now(),
+        tooling={},
+        resolved=resolved_from_state(state),
+    )
+
+    assert key in rebuilt["findings"]
+    assert rebuilt["findings"][key]["resolved_on"] == "2026-08-20"
+    assert rebuilt["findings"][key]["issue_number"] == 45
+    assert rebuilt["findings"][key]["last_seen"] == "2026-08-19", (
+        "a resolved finding must not keep being marked as seen")
+
+
+def provenance_of(state: dict) -> dict:
+    from src.state import provenance_from_state
+    return provenance_from_state(state)
+
+
+# --- the regression cycle -------------------------------------------------
+
+def test_a_returning_finding_is_new_and_keeps_its_history(tmp_path, capsys):
+    """File, resolve, then reintroduce. The finding must come back as NEW - a
+    regression is the one direction this tool must not miss - while carrying
+    the issue number and first_seen of the original."""
+    state = tmp_path / "findings.json"
+    key = "CVE-2023-45803::python::urllib3"
+
+    # It was filed as #45 and later resolved.
+    state.write_text(
+        (FIXTURES / "state" / "with_resolved.json").read_text(encoding="utf-8"),
+        encoding="utf-8")
+
+    # 02_new_finding.json contains urllib3 again.
+    out = tmp_path / "next.json"
+    run(FIXTURES / "grype" / "02_new_finding.json", state, out)
+    printed = capsys.readouterr().out
+
+    assert "new:        1" in printed
+
+    record = document(out)["findings"][key]
+    assert record["resolved_on"] is None, "a returning finding is not resolved"
+    assert record["issue_number"] == 45, "lost the link to the original issue"
+    assert record["first_seen"] == "2026-08-01", "history restarted"
+
+
+def test_the_regression_body_references_the_original_issue():
+    from src.issues import render_issue
+    from src.model import parse_grype
+
+    scan = parse_grype(document(FIXTURES / "grype" / "02_new_finding.json"))
+    key = "CVE-2023-45803::python::urllib3"
+    previous = {"issue_number": 45, "resolved_on": "2026-08-20"}
+
+    _, body, _ = render_issue(scan[key], scan, previous)
+
+    assert "previously reported in #45" in body
+    assert "resolved on 2026-08-20" in body
+    assert "It has returned." in body
+
+
+def test_a_first_time_finding_has_no_regression_notice():
+    from src.issues import render_issue
+    from src.model import parse_grype
+
+    scan = parse_grype(document(FIXTURES / "grype" / "02_new_finding.json"))
+    key = "CVE-2023-45803::python::urllib3"
+
+    _, body, _ = render_issue(scan[key], scan, {"issue_number": None,
+                                                "resolved_on": None})
+    assert "has returned" not in body
+    assert "previously reported" not in body
+
+
+def test_findings_that_resolve_are_recorded_not_deleted(tmp_path, capsys):
+    """The change this whole schema bump exists for."""
+    state = tmp_path / "findings.json"
+    state.write_text(
+        (FIXTURES / "state" / "baseline.json").read_text(encoding="utf-8"),
+        encoding="utf-8")
+
+    out = tmp_path / "next.json"
+    run(FIXTURES / "grype" / "04_resolved.json", state, out)
+    assert "resolved:   1" in capsys.readouterr().out
+
+    record = document(out)["findings"]["CVE-2018-18074::python::requests"]
+    assert record["resolved_on"], "resolved finding was deleted, not recorded"

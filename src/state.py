@@ -19,7 +19,9 @@ __all__ = [
     "SCHEMA_VERSION",
     "findings_from_state",
     "load_state",
+    "migrate",
     "provenance_from_state",
+    "resolved_from_state",
     "save_state",
     "state_documents_equal",
     "state_from_findings",
@@ -27,7 +29,8 @@ __all__ = [
     "utc_now",
 ]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_READABLE = (1, 2)
 
 _LOG = logging.getLogger(__name__)
 
@@ -87,14 +90,30 @@ def tooling_from_grype(report: dict, syft_version: str | None = None) -> dict:
     return tooling
 
 
-def _require_supported_schema(state: dict) -> None:
+def migrate(state: dict) -> dict:
+    """Bring a state document up to the current schema, or refuse it.
+
+    v1 -> v2 adds `resolved_on` to every record. A v1 document has no resolved
+    records by construction - v1 deleted them - so every finding it carries is
+    currently present and stays unresolved. Nothing is inferred and nothing is
+    reinterpreted; the field simply did not exist.
+    """
     version = state.get("schema_version")
-    if version != SCHEMA_VERSION:
+    if version == SCHEMA_VERSION:
+        return state
+    if version not in _READABLE:
         raise ValueError(
             f"unsupported state schema_version {version!r}; this build reads "
-            f"{SCHEMA_VERSION}. Write a migration rather than reinterpreting "
-            f"the file."
+            f"{_READABLE}. Write a migration rather than reinterpreting the file."
         )
+
+    upgraded = dict(state)
+    upgraded["schema_version"] = SCHEMA_VERSION
+    upgraded["findings"] = {
+        key: {**record, "resolved_on": record.get("resolved_on")}
+        for key, record in (state.get("findings") or {}).items()
+    }
+    return upgraded
 
 
 def _serialise(state: dict) -> str:
@@ -109,11 +128,13 @@ def provenance_from_state(state: dict) -> dict[str, dict]:
     Phase 4 mutates the returned dict after filing issues, then hands it back
     to `state_from_findings` for a single serialisation.
     """
-    _require_supported_schema(state)
+    state = migrate(state)
     return {
         key: {
             "first_seen": record.get("first_seen"),
+            "last_seen": record.get("last_seen"),
             "issue_number": record.get("issue_number"),
+            "resolved_on": record.get("resolved_on"),
         }
         for key, record in (state.get("findings") or {}).items()
     }
@@ -128,10 +149,27 @@ def findings_from_state(state: dict) -> dict[str, Finding]:
     carrying the CVE as its `id`. Recomputing would undo that and file a
     duplicate issue.
     """
-    _require_supported_schema(state)
+    return _findings(state, resolved=False)
+
+
+def resolved_from_state(state: dict) -> dict[str, Finding]:
+    """The findings this document records as already resolved.
+
+    Kept so the link between a finding and the issue it was filed under
+    survives the finding going away. Without them a resolved finding's
+    issue_number is simply deleted, and nothing can close that issue or
+    reference it if the vulnerability returns.
+    """
+    return _findings(state, resolved=True)
+
+
+def _findings(state: dict, *, resolved: bool) -> dict[str, Finding]:
+    state = migrate(state)
 
     findings: dict[str, Finding] = {}
     for key, record in (state.get("findings") or {}).items():
+        if bool(record.get("resolved_on")) != resolved:
+            continue
         package = record.get("package") or {}
         findings[key] = Finding(
             key=key,
@@ -153,6 +191,7 @@ def state_from_findings(
     provenance: dict,
     generated_at: str,
     tooling: dict,
+    resolved: dict[str, Finding] | None = None,
 ) -> dict:
     """Build a writable state document from the current Findings.
 
@@ -160,16 +199,21 @@ def state_from_findings(
     Two lookups either side of midnight UTC would eventually write a record
     first seen after it was last seen.
 
+    `resolved` holds findings no longer reported. They stay in the document
+    with a `resolved_on` date rather than being deleted, because the record is
+    the only link between a finding and the issue it was filed under: delete it
+    and nothing can close that issue, or reference it if the finding returns.
+    Their `last_seen` stays at the day they were last actually seen.
+
     Findings are emitted in key order and every list is sorted, so an unchanged
     scan rewrites the file byte for byte identically.
     """
     day = date.fromisoformat(generated_at[:10]).isoformat()
+    resolved = resolved or {}
 
-    records: dict[str, dict] = {}
-    for key in sorted(findings):
-        finding = findings[key]
-        prior = provenance.get(key) or {}
-        records[key] = {
+    def record_for(finding: Finding, *, resolved_on: str | None) -> dict:
+        prior = provenance.get(finding.key) or {}
+        return {
             "id": finding.id,
             "aliases": sorted(finding.aliases),
             "package": {
@@ -181,15 +225,30 @@ def state_from_findings(
             "fixed_in": sorted(finding.fixed_in),
             "fix_state": finding.fix_state,
             "first_seen": prior.get("first_seen") or day,
-            "last_seen": day,
+            "last_seen": prior.get("last_seen") or day if resolved_on else day,
             "issue_number": prior.get("issue_number"),
+            "resolved_on": resolved_on,
         }
+
+    records: dict[str, dict] = {}
+    for key, finding in findings.items():
+        records[key] = record_for(finding, resolved_on=None)
+
+    for key, finding in resolved.items():
+        # A finding that is present again is not resolved, whatever the
+        # previous document said. That is a regression, and it is handled as
+        # new rather than quietly re-marked.
+        if key in records:
+            continue
+        prior = provenance.get(key) or {}
+        records[key] = record_for(
+            finding, resolved_on=prior.get("resolved_on") or day)
 
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at,
         "tooling": tooling,
-        "findings": records,
+        "findings": {key: records[key] for key in sorted(records)},
     }
 
 
@@ -208,7 +267,7 @@ def state_documents_equal(
     asked.
 
     Only top-level keys can be ignored. `findings` is compared in full,
-    `last_seen` included — a finding still being present today is a fact the
+    `last_seen` included - a finding still being present today is a fact the
     audit trail records.
 
     A missing document (None) never equals a present one, so the first run
