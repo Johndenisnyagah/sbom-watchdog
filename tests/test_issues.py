@@ -102,21 +102,71 @@ def test_single_fixed_version_is_stated_plainly():
     _, body, _ = render_issue(finding(fixed_in=("2.20.0",)))
     assert "**Fixed in:** 2.20.0" in body
     assert "separate release lines" not in body
+    # With something to install, the scanner's own fix vocabulary still earns
+    # its place next to the version.
+    assert "| Fix state | fixed |" in body
+    assert "no longer reported as" in body
 
 
-def test_wont_fix_says_no_upgrade_will_help():
-    """Unexercised by every fixture and by real Grype output, which reported
-    `fixed` for all 22 findings."""
+def test_wont_fix_leads_with_the_situation_not_a_missing_version():
+    """"Fixed in: nothing" reads as a template that failed to fill itself in.
+    The bold label has to state the situation, and the sentence after it has to
+    name the decision the reader faces, because there is nothing to install."""
     _, body, _ = render_issue(finding(fixed_in=(), fix_state="wont-fix"))
-    assert "wont-fix" in body
+
+    assert "**No fix is planned.**" in body
     assert "no upgrade will resolve it" in body
-    assert "no fixed version has been published" not in body
+    assert "replace the dependency" in body
+    assert "accept the risk and record why" in body
+
+    assert "**Fixed in:**" not in body
+    assert "| Fix state |" not in body, "raw scanner vocabulary restating the prose"
+    assert "removed or replaced" in body
+    assert "no longer reported as" not in body
 
 
-def test_no_published_fix_says_so():
+def test_no_available_fix_leads_with_the_situation():
     _, body, _ = render_issue(finding(fixed_in=(), fix_state="not-fixed"))
-    assert "no fixed version has been published yet" in body
+
+    assert "**No fix is available.**" in body
+    assert "nothing to upgrade to" in body
+    assert "replace the dependency" in body
+    assert "accept the risk and record why" in body
+
+    assert "**Fixed in:**" not in body
     assert "wont-fix" not in body
+    assert "| Fix state |" not in body
+
+
+def test_the_footer_does_not_imply_waiting_works_when_nothing_is_coming():
+    """pycrypto's last release was 2013. "Until it is no longer reported as
+    vulnerable" is accurate for something fixable and quietly wrong here: it
+    never stops being reported, so the sentence implies waiting is a strategy."""
+    _, body, _ = render_issue(finding(fixed_in=(), fix_state="not-fixed"))
+    assert "until the dependency is removed or replaced" in body
+    assert "no longer reported as" not in body
+
+
+# --- the no-fix label -----------------------------------------------------
+
+def test_no_fix_label_is_applied_when_there_is_nothing_to_install():
+    """A dependency-replacement decision is a different kind of work item from
+    a version bump, and worth filtering for."""
+    for state in ("not-fixed", "wont-fix", "unknown"):
+        _, _, labels = render_issue(finding(fixed_in=(), fix_state=state))
+        assert "no-fix" in labels, state
+
+
+def test_no_fix_label_is_absent_when_a_fix_exists():
+    _, _, labels = render_issue(finding(fixed_in=("2.20.0",)))
+    assert "no-fix" not in labels
+    assert labels == ["sbom-watchdog", "severity:high"]
+
+
+def test_no_fix_label_sits_alongside_the_usual_two():
+    _, _, labels = render_issue(finding(fixed_in=(), fix_state="not-fixed",
+                                        severity="Critical"))
+    assert labels == ["sbom-watchdog", "severity:critical", "no-fix"]
 
 
 def test_fixed_in_phrase_handles_all_three_shapes():

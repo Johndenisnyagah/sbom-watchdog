@@ -37,6 +37,7 @@ __all__ = [
     "find_existing_issue",
     "fix_line",
     "fixed_in_phrase",
+    "has_fix",
     "highest_version",
     "package_findings",
     "render_issue",
@@ -44,6 +45,7 @@ __all__ = [
 ]
 
 LABEL = "sbom-watchdog"
+NO_FIX_LABEL = "no-fix"
 API_ROOT = "https://api.github.com"
 KEY_MARKER = "Finding key:"
 
@@ -56,6 +58,7 @@ _LABEL_COLOURS = {
     "severity:low": "c2e0c6",
     "severity:negligible": "d4c5f9",
     "severity:unknown": "cccccc",
+    "no-fix": "5319e7",
 }
 
 
@@ -137,14 +140,34 @@ def fixed_in_phrase(versions: tuple[str, ...]) -> str:
             "your major version)")
 
 
+def has_fix(finding: Finding) -> bool:
+    """Whether there is a version to install. The whole shape of the issue
+    depends on this: with a fix it is a version bump, without one it is a
+    decision about whether to keep the dependency at all."""
+    return bool(finding.fixed_in)
+
+
 def fix_line(finding: Finding) -> str:
-    """The line telling the reader what to do about it."""
-    if finding.fixed_in:
+    """The line telling the reader what to do about it.
+
+    A finding with no fix is a different kind of work item from one with a
+    version to install, and the sentence has to say so. "Fixed in: no fixed
+    version has been published yet" reads as a template that failed to fill
+    itself in - the bold label promises a version and then negates itself - and
+    it leaves the reader to work out on their own that upgrading is not on the
+    table. Lead with the situation, then name the decision they actually face.
+    """
+    if has_fix(finding):
         return "**Fixed in:** " + fixed_in_phrase(finding.fixed_in)
     if finding.fix_state == "wont-fix":
-        return ("**Fixed in:** nothing. The maintainers have marked this "
-                "wont-fix, so no upgrade will resolve it.")
-    return "**Fixed in:** no fixed version has been published yet."
+        return ("**No fix is planned.** The maintainers have marked this "
+                "wont-fix, so no upgrade will resolve it. The realistic options "
+                "are to replace the dependency with a maintained alternative, "
+                "or to accept the risk and record why.")
+    return ("**No fix is available.** No patched release has been published, so "
+            "there is nothing to upgrade to. The realistic options are to "
+            "replace the dependency with a maintained alternative, or to accept "
+            "the risk and record why.")
 
 
 def render_issue(finding: Finding, findings=None,
@@ -180,6 +203,28 @@ def render_issue(finding: Finding, findings=None,
             + chr(10) * 2
         )
 
+    # The Fix state row is dropped where the prose already says it. With no
+    # fix, "not-fixed" is raw scanner vocabulary restating the sentence below
+    # it in a second dialect; with a fix, it still adds something next to a
+    # version number.
+    rows = [
+        f"| Severity | {finding.severity} |",
+        f"| Package | `{finding.package_name}` ({finding.package_type}) |",
+        f"| Affected version(s) | {versions} |",
+    ]
+    if has_fix(finding):
+        rows.append(f"| Fix state | {finding.fix_state} |")
+    table = chr(10).join(rows)
+
+    # "until it is no longer reported as vulnerable" is accurate for something
+    # fixable and quietly wrong for something that is not: pycrypto's last
+    # release was 2013, so it never stops being reported, and the sentence
+    # would imply that waiting is a strategy.
+    if has_fix(finding):
+        persistence = "until the dependency is no longer reported as vulnerable"
+    else:
+        persistence = "until the dependency is removed or replaced"
+
     siblings = package_findings(finding, findings)
     guidance = [fix_line(finding)]
 
@@ -209,10 +254,7 @@ def render_issue(finding: Finding, findings=None,
 
 | | |
 | --- | --- |
-| Severity | {finding.severity} |
-| Package | `{finding.package_name}` ({finding.package_type}) |
-| Affected version(s) | {versions} |
-| Fix state | {finding.fix_state} |
+{table}
 
 {(chr(10)+chr(10)).join(guidance)}
 
@@ -224,17 +266,16 @@ def render_issue(finding: Finding, findings=None,
 {KEY_MARKER} `{finding.key}`
 
 ---
-Filed by [sbom-watchdog](https://github.com/Johndenisnyagah/sbom-watchdog). This
-issue was opened because the finding was not present in the previous scan, or
-because it crossed the severity threshold since the last run.
+Filed by [sbom-watchdog](https://github.com/Johndenisnyagah/sbom-watchdog). This issue was opened because the finding was not present in the previous scan, or because it crossed the severity threshold since the last run.
 
-Closing this issue does not resolve the finding: it stays recorded in
-`.sbom-watchdog/findings.json` until the dependency is no longer reported as
-vulnerable. Closing is safe - the issue number is kept in state, so nothing
-refiles it.
+Closing this issue does not resolve the finding: it stays recorded in `.sbom-watchdog/findings.json` {persistence}. Closing is safe - the issue number is kept in state, so nothing refiles it.
 """
 
     labels = [LABEL, f"severity:{finding.severity.lower()}"]
+    if not has_fix(finding):
+        # A separate kind of work item: a dependency-replacement decision
+        # rather than a version bump, and worth filtering for on its own.
+        labels.append(NO_FIX_LABEL)
     return title, body, labels
 
 
