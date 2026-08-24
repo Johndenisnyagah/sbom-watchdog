@@ -43,6 +43,26 @@ inputs:
     required: false
     default: 'v0.117.0'
 
+  write-sbom-history:
+    description: >-
+      When 'true', write the CycloneDX inventory to sboms/YYYY-MM-DD.json in
+      your repository as an append-only audit trail. One file per day the scan
+      ran, never skipped for being unchanged, so a missing file means no scan
+      ran that day and nothing else. Off by default: an action that starts
+      creating files in your repository after you pinned a version is a bad
+      surprise. Your workflow commits it; this only writes it.
+    required: false
+    default: 'false'
+
+  write-inventory:
+    description: >-
+      When 'true', write SECURITY-INVENTORY.md at your repository root: counts
+      by severity, split between open and resolved, in language a procurement
+      reviewer or auditor can follow. Off by default, same reason. Your
+      workflow commits it.
+    required: false
+    default: 'false'
+
   github-token:
     description: >-
       Token used to search, file and close issues. Pass secrets.GITHUB_TOKEN
@@ -75,6 +95,16 @@ outputs:
       your commit step on this rather than on `git diff`: generated_at moves
       every run, so a textual comparison commits daily with nothing in it.
     value: ${{ steps.diff.outputs.state_changed }}
+  sbom-path:
+    description: >-
+      Path of the dated SBOM written this run, empty when write-sbom-history is
+      off or the run was a dry run.
+    value: ${{ steps.diff.outputs.sbom_path }}
+  inventory-path:
+    description: >-
+      Path of the inventory written this run, empty when write-inventory is off
+      or the run was a dry run.
+    value: ${{ steps.diff.outputs.inventory_path }}
   commit-message:
     description: >-
       The message to commit the state file under. Use it rather than composing
@@ -217,6 +247,8 @@ runs:
         STATE_PATH: ${{ inputs.state-path }}
         THRESHOLD: ${{ inputs.severity-threshold }}
         SYFT_VERSION: ${{ inputs.syft-version }}
+        WRITE_SBOM_HISTORY: ${{ inputs.write-sbom-history }}
+        WRITE_INVENTORY: ${{ inputs.write-inventory }}
       run: |
         set -euo pipefail
 
@@ -231,6 +263,17 @@ runs:
         fi
         echo "issue mode: ${issues_flag}"
 
+        # Both compliance outputs are opt-in, so the flags are only passed
+        # when asked for. run.py writes nothing it was not given a path for.
+        extra=()
+        if [ "${WRITE_SBOM_HISTORY}" = "true" ]; then
+          extra+=(--sbom "${RUNNER_TEMP}/sbom-watchdog/sbom.cdx.json"
+                  --sbom-history sboms)
+        fi
+        if [ "${WRITE_INVENTORY}" = "true" ]; then
+          extra+=(--inventory SECURITY-INVENTORY.md)
+        fi
+
         python3 -m src.run \
           --scan "${RUNNER_TEMP}/sbom-watchdog/grype.json" \
           --state "${STATE_PATH}" \
@@ -238,4 +281,4 @@ runs:
           --threshold "${THRESHOLD}" \
           --repo "${GITHUB_REPOSITORY}" \
           --syft-version "${SYFT_VERSION#v}" \
-          "${issues_flag}"
+          "${issues_flag}" "${extra[@]}"

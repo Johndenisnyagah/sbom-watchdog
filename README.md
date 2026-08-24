@@ -138,6 +138,8 @@ starting from scratch.
 | `severity-threshold` | `High` | Severity at or above which a new finding earns an issue. Everything found is recorded regardless; this only decides what gets filed. |
 | `state-path` | `.sbom-watchdog/findings.json` | Where the committed record lives. |
 | `dry-run` | `false` | When exactly `true`, print what would be filed and write nothing. Any other value files for real. |
+| `write-sbom-history` | `false` | Write the inventory to `sboms/YYYY-MM-DD.json` as an audit trail. Off by default. |
+| `write-inventory` | `false` | Write `SECURITY-INVENTORY.md` at the repository root. Off by default. |
 | `syft-version` | `v1.51.0` | Pinned. A scanner that changes its output format under you should do it on a version bump you chose. |
 | `grype-version` | `v0.117.0` | Pinned, same reason. |
 
@@ -150,6 +152,8 @@ starting from scratch.
 | `unchanged` | Findings present and unchanged. |
 | `bootstrap` | `true` when there was no previous state file. |
 | `state-changed` | `true` when the state file is worth committing. Gate your commit on this. |
+| `sbom-path` | Path of the dated SBOM written this run, empty when that output is off. |
+| `inventory-path` | Path of the inventory written this run, empty when that output is off. |
 | `commit-message` | The message to commit under. Use it rather than composing one from the counts. |
 
 ## How it works
@@ -223,6 +227,99 @@ would change identity between runs and get filed twice. The CVE wins where one
 exists, every identifier ever seen is kept as an alias, and a finding whose key
 changes because a CVE was assigned overnight is matched back to its old record
 by alias overlap.
+
+## The compliance output
+
+Two files, both off by default, because an action that starts creating files in
+your repository after you pinned a version is a bad surprise. Turn them on with
+`write-inventory: 'true'` and `write-sbom-history: 'true'`, and commit them in
+the same step that commits the state file.
+
+`SECURITY-INVENTORY.md` is written for whoever asks you what is in your
+software — a procurement reviewer, an auditor, a customer's security
+questionnaire. It deliberately contains no scanner vocabulary. This is the real
+thing, from a repository with 34 open findings:
+
+> # Security inventory
+>
+> This file is generated automatically and should not be edited by hand. It lists every known security vulnerability in the software this project depends on, and what can be done about each one.
+>
+> **Last checked:** 24 August 2026
+> **Vulnerabilities currently open:** 34
+> **Vulnerabilities resolved since tracking began:** 0
+>
+> ## What is open now
+>
+> | Severity | Count |
+> | --- | ---: |
+> | Critical | 2 |
+> | High | 15 |
+> | Medium | 11 |
+> | Low | 6 |
+> | **Total** | **34** |
+>
+> Severity is the rating published by the public vulnerability databases, not an assessment of how this project uses the software. A high severity vulnerability in a component that is never reached may present little practical risk, and judging that is a human decision this tool does not make.
+>
+> ### Can be fixed by updating (31)
+>
+> 31 of the 34 open vulnerabilities have a newer version of the affected software available that resolves them.
+>
+> ### No fix available (3)
+>
+> 3 of the 34 open vulnerabilities have no published fix. Updating will not resolve these: the software has to be replaced with a maintained alternative, or removed, or the risk accepted and recorded. This is a different decision from the ones above, and usually a slower one.
+>
+> | Package | Version in use | Severity | Advisory | Fixed in |
+> | --- | --- | --- | --- | --- |
+> | pycrypto | 2.6.1 | Critical | CVE-2013-7459 | none published |
+> | pycrypto | 2.6.1 | High | CVE-2018-6594 | none published |
+> | paramiko | 2.4.1 | Low | CVE-2026-44405 | none published |
+>
+> *(a full table of all open vulnerabilities follows)*
+>
+> ## What has been resolved
+>
+> 7 vulnerabilities were reported previously and are no longer present. They are kept here because a record of having fixed something is part of the trail, not clutter to be tidied away.
+>
+> | Package | Severity | Advisory | Resolved on |
+> | --- | --- | --- | --- |
+> | urllib3 | High | CVE-2026-21441 | 24 August 2026 |
+>
+> ## How this was checked
+>
+> | | |
+> | --- | --- |
+> | Date of this check | 24 August 2026 |
+> | Software inventory produced by | Syft 1.51.0 |
+> | Vulnerabilities identified by | Grype 0.117.0 |
+> | Vulnerability data published on | 24 August 2026 |
+
+The "no fix available" split is the part an auditor cares about. A package
+awaiting an upgrade is scheduled work; a package with no published fix is a
+decision about whether to keep depending on it at all, and those are different
+answers to give someone.
+
+The resolved section is why this is more than a snapshot. A finding that stops
+being reported is kept with the date it went away, rather than deleted, so the
+file shows what was fixed and when.
+
+### The SBOM history
+
+`sboms/YYYY-MM-DD.json` is the CycloneDX inventory, one file per day the scan
+ran. It is written every day and never skipped for being unchanged, which is a
+deliberate choice with a real cost: most days it is near-identical to the day
+before.
+
+The reason is that a missing file has to mean one thing. If it could mean
+either "no scan ran" or "nothing had changed", then the trail cannot distinguish
+a stable project from an abandoned one — and since GitHub disables scheduled
+workflows after 60 days of inactivity, going quiet is a realistic way for this
+to end. An auditor asking "prove you generated an inventory on 14 March" is
+answered by `sboms/2026-03-14.json`, and answering instead with a
+de-duplication rule they have to take on trust is a worse story.
+
+Two files from consecutive days differ only in the document's serial number and
+timestamp when nothing changed, which is itself the evidence that nothing
+changed.
 
 ## Operating it
 

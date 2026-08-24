@@ -31,6 +31,7 @@ from .issues import (
     render_issue,
 )
 from .model import Finding, parse_grype
+from .report import write_inventory, write_sbom_history
 from .state import (
     findings_from_state,
     load_state,
@@ -239,6 +240,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                                   "GITHUB_TOKEN in the environment")
     parser.add_argument("--repo", default=None,
                         help="owner/name of the repository to file issues in")
+    parser.add_argument("--sbom", default=None,
+                        help="the CycloneDX SBOM the scan produced, copied into "
+                             "the dated history when --sbom-history is given")
+    parser.add_argument("--sbom-history", default=None,
+                        help="directory to write the dated SBOM copy into; "
+                             "omitted means no history is written")
+    parser.add_argument("--inventory", default=None,
+                        help="path to write SECURITY-INVENTORY.md to; omitted "
+                             "means no inventory is written")
     parser.add_argument("--message-file", default=None,
                         help="path to write the commit message to, for the "
                              "commit-back step to read")
@@ -254,6 +264,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--out is required unless --write-state is given")
     if args.file_issues and not args.repo:
         parser.error("--file-issues needs --repo owner/name")
+    if args.sbom_history and not args.sbom:
+        parser.error("--sbom-history needs --sbom, the file to copy")
     return args
 
 
@@ -316,6 +328,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     # The workflow builds its commit message from these rather than parsing
     # anything back out of the document.
+    # Compliance outputs, both opt-in. Skipped on a dry run for the same
+    # reason the state write is: a preview that leaves files behind in
+    # somebody's repository is not a preview.
+    if not args.dry_run_issues:
+        if args.sbom_history:
+            written = write_sbom_history(Path(args.sbom), args.sbom_history,
+                                         state["generated_at"])
+            print(f"SBOM history: {written}")
+            _emit_github_output("sbom_path", str(written))
+        if args.inventory:
+            written = write_inventory(args.inventory, state)
+            print(f"inventory: {written}")
+            _emit_github_output("inventory_path", str(written))
+
     message = commit_message(result, state)
     if args.message_file:
         Path(args.message_file).parent.mkdir(parents=True, exist_ok=True)
