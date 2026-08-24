@@ -17,6 +17,7 @@ from src.issues import (
     fixed_in_phrase,
     highest_version,
     package_findings,
+    package_line,
     render_issue,
     version_key,
 )
@@ -360,3 +361,100 @@ def test_dry_run_threads_the_scan_into_every_rendered_issue():
     scan = urllib3_scan()
     rendered = dry_run(list(scan.values()), scan)
     assert rendered.count("highest fix version among them is 2.7.0") == 4
+
+
+# --- what upgrading does to the rest of the package -----------------------
+#
+# Three shapes, three actions. Two pycrypto issues against the same abandoned
+# package read as two separate decisions, each carrying the same "replace it or
+# accept the risk" paragraph and neither acknowledging the other, when one
+# decision closes both.
+
+def package(name: str, entries) -> dict:
+    """A scan of one package: (cve, fixed_in) per finding."""
+    return {
+        f"{cve}::python::{name}": finding(
+            key=f"{cve}::python::{name}", id=cve, aliases=frozenset({cve}),
+            package_name=name, versions=("1.0",), fixed_in=fixed_in,
+            fix_state="fixed" if fixed_in else "not-fixed",
+        )
+        for cve, fixed_in in entries
+    }
+
+
+def test_all_no_fix_says_one_decision_closes_everything():
+    """The pycrypto shape. Nothing to upgrade to, so the only useful fact is
+    that replacing the package resolves every one of them at once."""
+    scan = package("pycrypto", [("CVE-2013-7459", ()), ("CVE-2018-6594", ())])
+    _, body, _ = render_issue(scan["CVE-2013-7459::python::pycrypto"], scan)
+
+    assert "This package has 2 findings in this scan, none with an available fix." in body
+    assert "Replacing or removing it resolves all of them." in body
+    assert "Upgrading to" not in body
+
+
+def test_all_fixable_still_answers_which_version():
+    """Unchanged. "Which version" is a different question from "how many does
+    this close", and where every finding has a fix the version is the answer."""
+    scan = package("urllib3", [("CVE-1", ("2.6.3",)), ("CVE-2", ("2.7.0",))])
+    _, body, _ = render_issue(scan["CVE-1::python::urllib3"], scan)
+
+    assert "the highest fix version among them is 2.7.0" in body
+    assert "Upgrading to anything below that leaves the others open." in body
+    assert "none with an available fix" not in body
+
+
+def test_mixed_states_both_halves_because_upgrading_is_not_enough():
+    """The dangerous shape, and the one that was silently wrong: it took the
+    fixable wording, which implies an upgrade covers everything. It does not.
+    A reader could upgrade and reasonably believe they were done."""
+    scan = package("paramiko", [("CVE-1", ("2.4.2",)), ("CVE-2", ())])
+    _, body, _ = render_issue(scan["CVE-1::python::paramiko"], scan)
+
+    assert "This package has 2 findings in this scan." in body
+    assert "Upgrading to 2.4.2 closes 1 of them" in body
+    assert "the remaining 1 has no available fix" in body
+    assert "resolved only by replacing or removing the package" in body
+
+    # It must not claim the upgrade is sufficient.
+    assert "leaves the others open" not in body
+    assert "resolves all of them" not in body
+
+
+def test_the_no_fix_issue_in_a_mixed_package_says_the_same_thing():
+    """Both issues for a package have to agree about what the work is,
+    whichever one the reader opens first."""
+    scan = package("paramiko", [("CVE-1", ("2.4.2",)), ("CVE-2", ())])
+    _, body, _ = render_issue(scan["CVE-2::python::paramiko"], scan)
+
+    assert "Upgrading to 2.4.2 closes 1 of them" in body
+    assert "the remaining 1 has no available fix" in body
+
+
+def test_counts_include_findings_below_the_threshold():
+    """A below-threshold finding is still resolved by replacing the package, so
+    the count has to be honest about the work rather than about the noise."""
+    scan = package("pycrypto", [("CVE-1", ()), ("CVE-2", ()), ("CVE-3", ())])
+    scan["CVE-3::python::pycrypto"] = finding(
+        key="CVE-3::python::pycrypto", id="CVE-3", aliases=frozenset({"CVE-3"}),
+        package_name="pycrypto", versions=("1.0",), fixed_in=(),
+        fix_state="not-fixed", severity="Low")
+
+    _, body, _ = render_issue(scan["CVE-1::python::pycrypto"], scan)
+    assert "This package has 3 findings in this scan" in body
+
+
+def test_package_line_pluralises_the_remainder():
+    """Rendered for a person; "the remaining 1 have" is the kind of detail that
+    makes a security tool look unattended."""
+    one = package_line(total=3, fixable=2, recommended="2.0")
+    many = package_line(total=4, fixable=2, recommended="2.0")
+
+    assert "the remaining 1 has no available fix and is resolved" in one
+    assert "the remaining 2 have no available fix and are resolved" in many
+
+
+def test_no_package_line_for_a_lone_finding():
+    scan = package("pycrypto", [("CVE-1", ())])
+    _, body, _ = render_issue(scan["CVE-1::python::pycrypto"], scan)
+    assert "findings in this scan" not in body

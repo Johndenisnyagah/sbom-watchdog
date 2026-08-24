@@ -40,6 +40,7 @@ __all__ = [
     "has_fix",
     "highest_version",
     "package_findings",
+    "package_line",
     "render_issue",
     "version_key",
 ]
@@ -170,6 +171,49 @@ def fix_line(finding: Finding) -> str:
             "the risk and record why.")
 
 
+def package_line(total: int, fixable: int, recommended: str | None) -> str:
+    """What upgrading, or not upgrading, does to the rest of this package.
+
+    Three shapes, because they lead to three different actions.
+
+    With no fix anywhere, the reader is deciding about the dependency rather
+    than about a version, and the useful fact is that one decision closes
+    everything. Without it, two issues against the same abandoned package read
+    as two separate decisions and the same "replace it or accept the risk"
+    paragraph appears twice, neither acknowledging the other.
+
+    With a fix everywhere, the question is which version, answered by the
+    highest.
+
+    Mixed is the dangerous one, and it used to take the fixable wording and
+    imply an upgrade covered everything. Upgrading closes some and leaves the
+    rest, so a reader could reasonably upgrade and believe they were done. Both
+    halves are stated and counted: what the upgrade closes, and what only
+    removing the package closes.
+
+    Counts cover every finding for the package in the scan, not only those
+    above the threshold. A below-threshold finding is still resolved by
+    replacing the package, and the count has to be honest about the work.
+    """
+    findings = f"{total} findings"
+
+    if not fixable:
+        return (f"This package has {findings} in this scan, none with an "
+                f"available fix. Replacing or removing it resolves all of them.")
+
+    if fixable == total:
+        return (f"This package has {findings} in this scan; the highest fix "
+                f"version among them is {recommended}. Upgrading to anything "
+                f"below that leaves the others open.")
+
+    remaining = total - fixable
+    has_have = "has" if remaining == 1 else "have"
+    return (f"This package has {findings} in this scan. Upgrading to "
+            f"{recommended} closes {fixable} of them; the remaining "
+            f"{remaining} {has_have} no available fix and {'is' if remaining == 1 else 'are'} "
+            f"resolved only by replacing or removing the package.")
+
+
 def render_issue(finding: Finding, findings=None,
                  previous=None) -> tuple[str, str, list[str]]:
     """Render a finding as (title, body, labels).
@@ -228,15 +272,11 @@ def render_issue(finding: Finding, findings=None,
     siblings = package_findings(finding, findings)
     guidance = [fix_line(finding)]
 
-    package_fixes = [v for sibling in siblings for v in sibling.fixed_in]
-    recommended = highest_version(package_fixes) or highest_version(finding.fixed_in)
+    recommended = highest_version([v for s in siblings for v in s.fixed_in])
+    fixable = [s for s in siblings if has_fix(s)]
 
-    if len(siblings) > 1 and recommended:
-        guidance.append(
-            f"This package has {len(siblings)} findings in this scan; the "
-            f"highest fix version among them is {recommended}. Upgrading to "
-            f"anything below that leaves the others open."
-        )
+    if len(siblings) > 1:
+        guidance.append(package_line(len(siblings), len(fixable), recommended))
 
     if recommended and any(_major(v) != _major(recommended)
                            for v in finding.versions):
