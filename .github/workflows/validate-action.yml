@@ -17,6 +17,14 @@ name: validate action.yml
 
 on:
   workflow_dispatch:
+  # A check that only runs when someone remembers to run it caught nothing on
+  # the day it was needed. Anything that changes what the manifest loads or
+  # what it ships gets checked automatically.
+  push:
+    paths:
+      - 'action.yml'
+      - 'packaging/**'
+      - '.github/workflows/validate-action.yml'
 
 permissions:
   contents: read
