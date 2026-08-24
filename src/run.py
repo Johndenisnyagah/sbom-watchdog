@@ -331,16 +331,19 @@ def main(argv: list[str] | None = None) -> int:
     # Compliance outputs, both opt-in. Skipped on a dry run for the same
     # reason the state write is: a preview that leaves files behind in
     # somebody's repository is not a preview.
+    wrote_files = False
     if not args.dry_run_issues:
         if args.sbom_history:
             written = write_sbom_history(Path(args.sbom), args.sbom_history,
                                          state["generated_at"])
             print(f"SBOM history: {written}")
             _emit_github_output("sbom_path", str(written))
+            wrote_files = True
         if args.inventory:
             written = write_inventory(args.inventory, state)
             print(f"inventory: {written}")
             _emit_github_output("inventory_path", str(written))
+            wrote_files = True
 
     message = commit_message(result, state)
     if args.message_file:
@@ -377,6 +380,7 @@ def main(argv: list[str] | None = None) -> int:
         print("dry run: the state file was not written, so the bootstrap is "
               "still available to a real run")
         _emit_github_output("state_changed", "false")
+        _emit_github_output("should_commit", "false")
         return 0
 
     # In-place mode. Writing an unchanged document would rewrite generated_at
@@ -388,7 +392,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"state written to {args.state} ({len(state['findings'])} findings)")
     else:
         print("no change; nothing committed")
+    # Two outputs because they are two different facts. `state_changed` says
+    # the vulnerability state moved. `should_commit` says there is something to
+    # write, which is also true when nothing moved but a dated SBOM was
+    # produced. A repository with no findings never moves, and gating its commit
+    # on the first would leave its audit trail empty - the readership the trail
+    # exists for.
     _emit_github_output("state_changed", "true" if changed else "false")
+    _emit_github_output("should_commit",
+                        "true" if (changed or wrote_files) else "false")
     if filing_error is not None:
         print(f"issue creation failed: {filing_error}")
         return 1

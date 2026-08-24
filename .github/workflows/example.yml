@@ -86,11 +86,18 @@ jobs:
           # Optional, shown with their defaults:
           # severity-threshold: 'High'
           # state-path: '.sbom-watchdog/findings.json'
+          # write-sbom-history: 'false'
+          # write-inventory: 'false'
 
       # The commit belongs to you, not to the action. An action that pushes to
       # your repository from six pasted lines is the wrong kind of surprise.
+      # Gated on should-commit, not state-changed. state-changed means the
+      # vulnerability state moved; should-commit means there is something to
+      # write, which is also true when nothing moved but a dated SBOM was
+      # produced. A repository with no findings never moves its state, so
+      # gating on state-changed alone would leave its audit trail empty.
       - name: Commit the state file
-        if: env.DRY_RUN != 'true' && steps.watchdog.outputs.state-changed == 'true'
+        if: env.DRY_RUN != 'true' && steps.watchdog.outputs.should-commit == 'true'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -116,6 +123,10 @@ jobs:
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           git add .sbom-watchdog/findings.json
+          # Only present if you turned the compliance outputs on. `git add` on a
+          # path that does not exist is an error, so ask first.
+          if [ -d sboms ]; then git add sboms; fi
+          if [ -f SECURITY-INVENTORY.md ]; then git add SECURITY-INVENTORY.md; fi
           if git diff --cached --quiet; then
             echo "nothing staged; another run already recorded this"
             exit 0

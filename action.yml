@@ -95,6 +95,15 @@ outputs:
       your commit step on this rather than on `git diff`: generated_at moves
       every run, so a textual comparison commits daily with nothing in it.
     value: ${{ steps.diff.outputs.state_changed }}
+  should-commit:
+    description: >-
+      'true' when this run produced something to commit: the vulnerability
+      state moved, or a dated SBOM was written, or the inventory was written.
+      Gate your commit step on this. It differs from state-changed in exactly
+      one case, and that case matters - a repository with no findings never
+      moves its state, so gating on state-changed alone leaves its audit trail
+      empty.
+    value: ${{ steps.diff.outputs.should_commit }}
   sbom-path:
     description: >-
       Path of the dated SBOM written this run, empty when write-sbom-history is

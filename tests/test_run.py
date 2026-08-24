@@ -451,3 +451,112 @@ def test_findings_that_resolve_are_recorded_not_deleted(tmp_path, capsys):
 
     record = document(out)["findings"]["CVE-2018-18074::python::requests"]
     assert record["resolved_on"], "resolved finding was deleted, not recorded"
+
+
+# --- the clean repository -------------------------------------------------
+#
+# A repository with no findings never moves its vulnerability state: findings
+# stays empty, so once the tooling settles the document is identical every day.
+# Gating the commit on state_changed therefore left its audit trail empty -
+# and a clean project is precisely the readership a compliance trail is for.
+#
+# It also inverted the write-every-day decision. A missing dated SBOM was
+# supposed to mean exactly one thing, "no scan ran that day". Uncommitted daily
+# files made it mean "or the project was clean" as well.
+
+CLEAN = FIXTURES / "grype" / "09_empty.json"
+
+
+def compliance_run(tmp_path, outputs, *, day=None):
+    """One run with both compliance outputs on, returning the step outputs."""
+    sbom = tmp_path / "sbom.json"
+    if not sbom.exists():
+        sbom.write_text('{"components": []}', encoding="utf-8")
+    outputs.write_text("", encoding="utf-8")
+
+    argv = ["--scan", str(CLEAN), "--state", str(tmp_path / "findings.json"),
+            "--write-state", "--sbom", str(sbom),
+            "--sbom-history", str(tmp_path / "sboms"),
+            "--inventory", str(tmp_path / "SECURITY-INVENTORY.md")]
+    assert main(argv) == 0
+    return step_outputs(outputs)
+
+
+def test_a_clean_repository_still_commits_its_daily_sbom(tmp_path, monkeypatch, capsys):
+    outputs = tmp_path / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+
+    first = compliance_run(tmp_path, outputs)
+    capsys.readouterr()
+
+    assert first["recorded"] == "0", "this fixture must have no findings"
+    assert first["should_commit"] == "true"
+
+    # Same day, same scan, same tooling: the document is identical, so the
+    # vulnerability state has not moved. There is still a file to commit.
+    second = compliance_run(tmp_path, outputs)
+    capsys.readouterr()
+
+    assert second["state_changed"] == "false", (
+        "a clean repository's state never moves - that is the whole problem")
+    assert second["should_commit"] == "true", (
+        "the daily SBOM was written and would never have been committed")
+
+
+def test_a_later_day_produces_a_new_dated_sbom_to_commit(tmp_path, monkeypatch, capsys):
+    outputs = tmp_path / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+
+    compliance_run(tmp_path, outputs)
+    capsys.readouterr()
+
+    monkeypatch.setattr("src.run.utc_now", lambda: "2099-01-02T03:17:00Z")
+    later = compliance_run(tmp_path, outputs)
+    capsys.readouterr()
+
+    assert later["state_changed"] == "false", "no finding moved"
+    assert later["should_commit"] == "true"
+
+    written = sorted(p.name for p in (tmp_path / "sboms").iterdir())
+    assert "2099-01-02.json" in written
+    assert len(written) == 2, "one file per day the scan ran"
+
+
+def test_state_changed_still_means_only_that_the_state_moved(tmp_path, monkeypatch, capsys):
+    """The two outputs must not collapse into each other. state_changed stays
+    a narrower and separately useful fact."""
+    outputs = tmp_path / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    state = tmp_path / "findings.json"
+
+    assert main(["--scan", str(REAL), "--state", str(state), "--write-state"]) == 0
+    capsys.readouterr()
+    outputs.write_text("", encoding="utf-8")
+
+    assert main(["--scan", str(REAL), "--state", str(state), "--write-state"]) == 0
+    capsys.readouterr()
+    emitted = step_outputs(outputs)
+
+    # No compliance outputs requested, nothing moved: both are false.
+    assert emitted["state_changed"] == "false"
+    assert emitted["should_commit"] == "false"
+
+
+def test_a_dry_run_never_asks_to_commit(tmp_path, monkeypatch, capsys):
+    outputs = tmp_path / "outputs.txt"
+    outputs.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+    sbom = tmp_path / "sbom.json"
+    sbom.write_text("{}", encoding="utf-8")
+
+    assert main(["--scan", str(CLEAN), "--state", str(tmp_path / "findings.json"),
+                 "--write-state", "--dry-run-issues", "--sbom", str(sbom),
+                 "--sbom-history", str(tmp_path / "sboms"),
+                 "--inventory", str(tmp_path / "SECURITY-INVENTORY.md")]) == 0
+    capsys.readouterr()
+
+    emitted = step_outputs(outputs)
+    assert emitted["should_commit"] == "false"
+    assert emitted["state_changed"] == "false"
+    assert not (tmp_path / "sboms").exists(), "a preview wrote a file"
+    assert not (tmp_path / "SECURITY-INVENTORY.md").exists()

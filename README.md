@@ -89,7 +89,7 @@ jobs:
           dry-run: ${{ env.DRY_RUN }}
 
       - name: Commit the state file
-        if: env.DRY_RUN != 'true' && steps.watchdog.outputs.state-changed == 'true'
+        if: env.DRY_RUN != 'true' && steps.watchdog.outputs.should-commit == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MESSAGE: ${{ steps.watchdog.outputs.commit-message }}
@@ -100,6 +100,11 @@ jobs:
           git remote set-url origin \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git add .sbom-watchdog/findings.json
+          # Only present if you turned the compliance outputs on. `git add` on a
+          # path that does not exist is an error, so ask first.
+          if [ -d sboms ]; then git add sboms; fi
+          if [ -f SECURITY-INVENTORY.md ]; then git add SECURITY-INVENTORY.md; fi
+          if git diff --cached --quiet; then exit 0; fi
           git commit -m "${MESSAGE}" -m "Run ${GITHUB_RUN_ID}"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
@@ -119,6 +124,8 @@ rather decide when the code under you changes, pin an immutable tag — `@v1.1`
 — or a commit SHA. `v1` only ever moves forward to a released, backward-
 compatible `v1.x`; a breaking change would be `v2` and would leave `v1` where
 it is.
+
+Gate the commit on `should-commit` rather than `state-changed`. They differ in one case, and it is the case that matters: a repository with no findings never moves its vulnerability state, so `state-changed` stays `false` forever and its audit trail would never be committed at all. `state-changed` is still there, and is the right signal if you want to act only when a finding actually appeared or went away.
 
 The commit step is yours rather than the action's, deliberately. An action that
 pushes to your repository from six lines you pasted is the wrong kind of
@@ -151,7 +158,8 @@ starting from scratch.
 | `resolved` | Findings no longer reported. |
 | `unchanged` | Findings present and unchanged. |
 | `bootstrap` | `true` when there was no previous state file. |
-| `state-changed` | `true` when the state file is worth committing. Gate your commit on this. |
+| `should-commit` | `true` when this run produced something to commit. **Gate your commit step on this.** |
+| `state-changed` | `true` when the vulnerability state itself moved. Narrower than `should-commit`, and useful if you want to act only when a finding appeared or went away. |
 | `sbom-path` | Path of the dated SBOM written this run, empty when that output is off. |
 | `inventory-path` | Path of the inventory written this run, empty when that output is off. |
 | `commit-message` | The message to commit under. Use it rather than composing one from the counts. |
