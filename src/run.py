@@ -74,8 +74,8 @@ def _print(text: str) -> None:
         print(text.encode(encoding, "replace").decode(encoding))
 
 
-def file_issues(selected, repo: str, token: str,
-                provenance: dict) -> tuple[dict[str, int], Exception | None]:
+def file_issues(selected, repo: str, token: str, provenance: dict,
+                findings=None) -> tuple[dict[str, int], Exception | None]:
     """File an issue per selected finding. Returns (key -> number, error).
 
     `provenance` is updated in place as each number is obtained, which does two
@@ -109,7 +109,7 @@ def file_issues(selected, repo: str, token: str,
                 filed[finding.key] = existing
                 continue
 
-            title, body, labels = render_issue(finding)
+            title, body, labels = render_issue(finding, findings)
             # ensure_labels returns only what can actually be applied; a token
             # without label permission still gets the issue filed.
             usable = ensure_labels(repo, labels, token)
@@ -238,7 +238,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run_issues:
         print()
-        _print(dry_run(select_for_issues(result, threshold=args.threshold)))
+        _print(dry_run(select_for_issues(result, threshold=args.threshold),
+                      current))
         print()
 
     filing_error = None
@@ -252,7 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         # provenance is updated in place, before the state document is built,
         # so the numbers land in the state this run commits rather than the
         # next one.
-        filed, filing_error = file_issues(selected, args.repo, token, provenance)
+        filed, filing_error = file_issues(selected, args.repo, token,
+                                          provenance, current)
         print(f"recorded {len(filed)} issue number(s) into state")
 
     # One timestamp for the whole run: state_from_findings derives both dates

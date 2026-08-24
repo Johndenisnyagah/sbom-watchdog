@@ -35,7 +35,10 @@ __all__ = [
     "find_existing_issue",
     "fix_line",
     "fixed_in_phrase",
+    "highest_version",
+    "package_findings",
     "render_issue",
+    "version_key",
 ]
 
 LABEL = "sbom-watchdog"
@@ -68,6 +71,53 @@ def advisory_url(identifier: str) -> str | None:
     return None
 
 
+def version_key(version: str) -> tuple:
+    """A sort key that orders 1.26.9 before 1.26.10.
+
+    CLAUDE.md deferred this until something compared versions semantically.
+    Something does now: picking the highest fix across a package's findings.
+    Plain string sort puts "1.26.10" before "1.26.9" and would recommend an
+    older version than the one that actually fixes everything.
+
+    Hand-rolled and standard library only. Split on dots; numeric parts compare
+    as integers, non-numeric parts as text and always lower, so 2.0 sorts above
+    2.0rc1. A shorter version sorts below a longer one sharing its prefix, so
+    1.26 is below 1.26.1.
+    """
+    key = []
+    for part in version.split("."):
+        if part.isdigit():
+            key.append((1, int(part), ""))
+        else:
+            key.append((0, 0, part))
+    return tuple(key)
+
+
+def highest_version(versions) -> str | None:
+    """The greatest version by natural order, or None when there are none."""
+    candidates = [v for v in versions if v]
+    return max(candidates, key=version_key) if candidates else None
+
+
+def package_findings(finding: Finding, findings) -> list[Finding]:
+    """Every finding in the scan against the same package.
+
+    Same name and same ecosystem, matching the identity rule: `requests` on
+    PyPI and `requests` on npm are unrelated packages.
+    """
+    if not findings:
+        return [finding]
+    return [
+        candidate for candidate in findings.values()
+        if candidate.package_name == finding.package_name
+        and candidate.package_type == finding.package_type
+    ]
+
+
+def _major(version: str) -> str:
+    return version.split(".", 1)[0]
+
+
 def fixed_in_phrase(versions: tuple[str, ...]) -> str:
     """Describe the fixed versions without choosing between them.
 
@@ -95,8 +145,15 @@ def fix_line(finding: Finding) -> str:
     return "**Fixed in:** no fixed version has been published yet."
 
 
-def render_issue(finding: Finding) -> tuple[str, str, list[str]]:
+def render_issue(finding: Finding, findings=None) -> tuple[str, str, list[str]]:
     """Render a finding as (title, body, labels).
+
+    `findings` is every finding in the current scan, not just the ones being
+    filed. A reader installs one version of a package, and that version has to
+    satisfy everything known about it: choosing from the filed subset alone can
+    recommend a version that leaves a below-threshold finding unfixed. One
+    issue per finding stays right - they resolve independently - but every one
+    of them has to give the same answer to "what do I install".
 
     The finding key is in the title because that is the deduplication net: one
     `GET /search/issues` for the key before creating tells us whether a
@@ -107,6 +164,24 @@ def render_issue(finding: Finding) -> tuple[str, str, list[str]]:
              f"[{finding.key}]")
 
     versions = ", ".join(finding.versions) if finding.versions else "unknown"
+
+    siblings = package_findings(finding, findings)
+    guidance = [fix_line(finding)]
+
+    package_fixes = [v for sibling in siblings for v in sibling.fixed_in]
+    recommended = highest_version(package_fixes) or highest_version(finding.fixed_in)
+
+    if len(siblings) > 1 and recommended:
+        guidance.append(
+            f"This package has {len(siblings)} findings in this scan; the "
+            f"highest fix version among them is {recommended}. Upgrading to "
+            f"anything below that leaves the others open."
+        )
+
+    if recommended and any(_major(v) != _major(recommended)
+                           for v in finding.versions):
+        guidance.append("This crosses a major version and may require code "
+                        "changes.")
 
     links = []
     for identifier in sorted(finding.aliases):
@@ -124,7 +199,7 @@ def render_issue(finding: Finding) -> tuple[str, str, list[str]]:
 | Affected version(s) | {versions} |
 | Fix state | {finding.fix_state} |
 
-{fix_line(finding)}
+{(chr(10)+chr(10)).join(guidance)}
 
 **Advisories**
 
@@ -136,26 +211,29 @@ def render_issue(finding: Finding) -> tuple[str, str, list[str]]:
 ---
 Filed by [sbom-watchdog](https://github.com/Johndenisnyagah/sbom-watchdog). This
 issue was opened because the finding was not present in the previous scan, or
-because it crossed the severity threshold since the last run. Closing it will
-not suppress it; the finding stays in `.sbom-watchdog/findings.json` until the
-dependency is no longer reported as vulnerable.
+because it crossed the severity threshold since the last run.
+
+Closing this issue does not resolve the finding: it stays recorded in
+`.sbom-watchdog/findings.json` until the dependency is no longer reported as
+vulnerable. Closing is safe - the issue number is kept in state, so nothing
+refiles it.
 """
 
     labels = [LABEL, f"severity:{finding.severity.lower()}"]
     return title, body, labels
 
 
-def dry_run(findings: list[Finding]) -> str:
+def dry_run(selected: list[Finding], findings=None) -> str:
     """What would be posted, as text. Posts nothing."""
-    if not findings:
+    if not selected:
         return "no issues would be filed"
 
-    blocks = [f"{len(findings)} issue(s) would be filed. Nothing was posted.\n"]
-    for index, finding in enumerate(findings, start=1):
-        title, body, labels = render_issue(finding)
+    blocks = [f"{len(selected)} issue(s) would be filed. Nothing was posted.\n"]
+    for index, finding in enumerate(selected, start=1):
+        title, body, labels = render_issue(finding, findings)
         blocks.append(
             f"{'=' * 72}\n"
-            f"ISSUE {index} of {len(findings)}\n"
+            f"ISSUE {index} of {len(selected)}\n"
             f"{'=' * 72}\n"
             f"title:  {title}\n"
             f"labels: {', '.join(labels)}\n"
