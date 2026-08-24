@@ -15,6 +15,13 @@ from src.state import findings_from_state
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
+# The one captured Grype document lives with the action rather than under
+# tests/, because the action must work from a checkout that has no test
+# directory. There is exactly one copy on purpose: two would let the packaged
+# self-check and this suite assert against different bytes, which is precisely
+# how a shipped action passes its own check while the parser has drifted.
+CAPTURED = pathlib.Path(__file__).parents[1] / "packaging" / "real_0117.json"
+
 
 def grype(name: str) -> dict:
     return parse_grype(json.loads((FIXTURES / "grype" / name).read_text()))
@@ -254,7 +261,7 @@ def test_parses_real_grype_output():
     Every other fixture is a reconstruction; this one is ground truth. It exists
     to fail when a Grype schema change breaks the parser, which is otherwise
     something we'd discover from a red workflow run."""
-    findings = grype("real_0117.json")
+    findings = parse_grype(json.loads(CAPTURED.read_text(encoding="utf-8")))
     assert len(findings) == 22
     assert "CVE-2020-14343::python::pyyaml" in findings
     assert all(f.package_type == "python" for f in findings.values())

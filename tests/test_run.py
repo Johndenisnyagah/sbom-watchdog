@@ -24,7 +24,9 @@ from src.state import (
 )
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
-REAL = FIXTURES / "grype" / "real_0117.json"
+# Captured Grype output, shipped with the action rather than under tests/ so
+# the packaged self-check and this suite read the same bytes.
+REAL = pathlib.Path(__file__).parents[1] / "packaging" / "real_0117.json"
 
 
 def run(scan: pathlib.Path, state: pathlib.Path, out: pathlib.Path) -> None:
@@ -194,9 +196,13 @@ def test_state_documents_equal_treats_a_missing_document_as_different(tmp_path):
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def build(previous_state, scan_name):
-    """(DiffResult, state document) for a scan against an optional prior state."""
-    report = json.loads((FIXTURES / "grype" / scan_name).read_text(encoding="utf-8"))
+def build(previous_state, scan):
+    """(DiffResult, state document) for a scan against an optional prior state.
+
+    `scan` is a fixture filename, or a path for the captured document that
+    lives outside tests/."""
+    path = scan if isinstance(scan, pathlib.Path) else FIXTURES / "grype" / scan
+    report = json.loads(path.read_text(encoding="utf-8"))
     current = parse_grype(report)
     previous = None if previous_state is None else findings_from_state(previous_state)
     result = diff(previous, current)
@@ -208,7 +214,7 @@ def build(previous_state, scan_name):
 
 
 def test_commit_message_bootstrap_names_the_baseline():
-    result, state = build(None, "real_0117.json")
+    result, state = build(None, REAL)
     assert commit_message(result, state) == (
         "Vulnerability state: baseline, 22 findings recorded [skip ci]"
     )
