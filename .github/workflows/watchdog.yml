@@ -214,8 +214,12 @@ jobs:
             cp .sbom-watchdog/findings.json out/findings.json
           fi
 
+      # Skipped outright on a dry run. run.py also declines to write the
+      # state file in that mode, so this is belt and braces - but the
+      # commit is the irreversible half, and it should be impossible to
+      # reach from a preview by any route.
       - name: Commit the updated state file
-        if: always() && steps.state.outputs.state_changed == 'true'
+        if: always() && inputs.dry_run != true && steps.state.outputs.state_changed == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

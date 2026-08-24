@@ -289,6 +289,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
 
+    # A dry run previews and writes nothing. Recording a baseline here would
+    # permanently consume the one bootstrap a repository gets: every finding
+    # would be "already known" from then on, and the first real run would file
+    # nothing. A preview that changes what the next run does is not a preview.
+    if args.dry_run_issues:
+        print("dry run: the state file was not written, so the bootstrap is "
+              "still available to a real run")
+        _emit_github_output("state_changed", "false")
+        return 0
+
     # In-place mode. Writing an unchanged document would rewrite generated_at
     # and hand git a diff with no information in it, so compare first and leave
     # the file alone when nothing moved.

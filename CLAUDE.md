@@ -240,6 +240,42 @@ Fixtures live in `tests/fixtures/grype/` and `tests/fixtures/state/`, described 
 
 Tests are the specification for phase 2. If a test fails, the implementation is wrong until an argument is made here that the test is.
 
+## Packaging notes for phase 6
+
+Collected from installing the tool into the testbed by hand. Every item is
+something an adopter would otherwise have to work out themselves.
+
+**The packaged action must carry a self-check.** Copying `src/` without
+`tests/` leaves an adopter running the parser with no validation at all,
+against a Grype version that may have moved since this was written. Bundle
+`real_0117.json`, parse it at startup, assert 22 findings, and fail fast on a
+mismatch. It is cheap, and it turns a silent misparse — which looks exactly
+like "no vulnerabilities found" — into a clear error.
+
+**The test steps do not ship.** `Install test dependencies` and `Run the test
+suite` reference `requirements-dev.txt` and `tests/`, neither of which belongs
+in a scan target. Left in, they fail the run before the scan. Removing them is
+the first thing every adopter would hit.
+
+**`.syft.yaml` must not carry our paths.** It excludes `./scratch/**`, which
+only exists in this repository. Adopter config should exclude what adopters
+have, not what we have.
+
+**Adopters need `.gitattributes` with `* text=auto eol=lf`.** `save_state`
+forces LF, so a runner is fine, but without the attribute a Windows
+contributor introduces CRLF churn in the committed state file.
+
+**`report.py` is empty and shipping.** Either fill it in phase 5 or exclude it
+from the package; dead weight in a security tool invites the question of what
+else is not doing anything.
+
+**A dry run must not write state.** Fixed in the orchestrator rather than the
+workflow: `--dry-run-issues` declines the state write, because recording a
+baseline during a preview permanently consumes the one bootstrap a repository
+gets and makes the first real run file nothing. The workflow also skips the
+commit step outright when `dry_run` is true, since the commit is the
+irreversible half and should be unreachable from a preview by any route.
+
 ## Conventions
 
 Python 3.11+, standard library only. Every module, `issues.py` included. Type hints throughout. `pytest` for tests, `ruff` for lint.

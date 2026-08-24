@@ -255,3 +255,58 @@ def test_commit_message_after_a_recompute_is_still_correct(tmp_path):
     assert "scan of )" not in message
     scanned = re.search(r"scan of (\S+)\)", message)
     assert scanned and DATE.match(scanned.group(1))
+
+
+# --- a dry run is a preview -----------------------------------------------
+#
+# The state write is as irreversible as the issue. Recording a baseline during
+# a preview permanently consumes the one bootstrap a repository gets: every
+# finding is "already known" from then on, so the first real run files nothing.
+
+def test_dry_run_does_not_create_a_state_file(tmp_path, capsys):
+    state = tmp_path / "findings.json"
+    assert not state.exists()
+
+    assert main(["--scan", str(REAL), "--state", str(state),
+                 "--write-state", "--dry-run-issues"]) == 0
+
+    assert not state.exists(), "a preview wrote the state file"
+    assert "the state file was not written" in capsys.readouterr().out
+
+
+def test_dry_run_leaves_an_existing_state_file_untouched(tmp_path, capsys):
+    state = tmp_path / "findings.json"
+    main(["--scan", str(FIXTURES / "grype" / "01_baseline.json"),
+          "--state", str(state), "--out", str(state)])
+    capsys.readouterr()
+    before = state.read_bytes()
+
+    assert main(["--scan", str(REAL), "--state", str(state),
+                 "--write-state", "--dry-run-issues"]) == 0
+
+    assert state.read_bytes() == before, "a preview rewrote the state file"
+
+
+def test_dry_run_reports_no_state_change_to_the_workflow(tmp_path, monkeypatch):
+    """The commit step keys off this. A preview must not present as something
+    to commit, whatever the diff found."""
+    outputs = tmp_path / "outputs.txt"
+    outputs.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+
+    main(["--scan", str(REAL), "--state", str(tmp_path / "findings.json"),
+          "--write-state", "--dry-run-issues"])
+
+    emitted = step_outputs(outputs)
+    assert emitted["state_changed"] == "false"
+    # The counts are still reported, so the preview is still informative.
+    assert emitted["recorded"] == "22"
+
+
+def test_a_real_run_still_writes_state(tmp_path):
+    """The guard must not have disabled the thing it is guarding."""
+    state = tmp_path / "findings.json"
+    assert main(["--scan", str(REAL), "--state", str(state),
+                 "--write-state"]) == 0
+    assert state.exists()
+    assert len(document(state)["findings"]) == 22
