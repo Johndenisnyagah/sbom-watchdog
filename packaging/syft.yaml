@@ -1,0 +1,18 @@
+# Default Syft configuration shipped with the action.
+#
+# Deliberately free of paths specific to any one repository. An adopter who
+# needs different exclusions puts a .syft.yaml at their repository root and
+# Syft picks it up instead of this file.
+exclude:
+  - ./.git/**
+  - ./node_modules/**
+  - ./.venv/**
+  - ./venv/**
+
+file:
+  metadata:
+    # Default is 'owned-by-package', which emits a file-type component for
+    # every manifest that owns a package. Those components have no purl and no
+    # version, and they carry the absolute path of whatever machine ran the
+    # scan, so a committed SBOM would churn with the runner.
+    selection: 'none'

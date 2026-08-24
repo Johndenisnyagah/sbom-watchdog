@@ -1,0 +1,239 @@
+name: 'sbom-watchdog'
+description: >-
+  Generate an SBOM, scan it for known vulnerabilities, and open an issue only
+  for findings that were not present in the previous scan.
+author: 'Johndenisnyagah'
+
+branding:
+  icon: 'eye'
+  color: 'orange'
+
+inputs:
+  severity-threshold:
+    description: >-
+      Severity at or above which a new finding earns an issue. One of Critical,
+      High, Medium, Low, Negligible, Unknown. Everything found is recorded in
+      the state file regardless; this only decides what gets filed.
+    required: false
+    default: 'High'
+
+  state-path:
+    description: >-
+      Where the committed state file lives, relative to the repository root.
+      Its absence is what triggers a bootstrap run.
+    required: false
+    default: '.sbom-watchdog/findings.json'
+
+  dry-run:
+    description: >-
+      When 'true', render the issues that would be filed and print them without
+      posting anything, and leave the state file untouched. Anything other than
+      the exact string 'true' files for real. A scheduled workflow passes no
+      inputs, so the default must be the acting one.
+    required: false
+    default: 'false'
+
+  syft-version:
+    description: 'Syft release tag to install. Pinned deliberately.'
+    required: false
+    default: 'v1.51.0'
+
+  grype-version:
+    description: 'Grype release tag to install. Pinned deliberately.'
+    required: false
+    default: 'v0.117.0'
+
+  github-token:
+    description: >-
+      Token used to search, file and close issues. Pass
+      ${{ secrets.GITHUB_TOKEN }} explicitly; this action will not reach for a
+      token you did not hand it. Needs issues:write, and contents:read for the
+      checkout.
+    required: true
+
+outputs:
+  new:
+    description: 'Count of findings not present in the previous scan.'
+    value: ${{ steps.diff.outputs.new }}
+  resolved:
+    description: 'Count of findings no longer reported.'
+    value: ${{ steps.diff.outputs.resolved }}
+  unchanged:
+    description: 'Count of findings present and unchanged since the previous scan.'
+    value: ${{ steps.diff.outputs.unchanged }}
+  bootstrap:
+    description: >-
+      'true' when there was no previous state file. A bootstrap records the
+      baseline and files nothing, so a first run cannot open several hundred
+      issues at once.
+    value: ${{ steps.diff.outputs.bootstrap }}
+  state-changed:
+    description: >-
+      'true' when the state file was rewritten and is worth committing. Gate
+      your commit step on this rather than on `git diff`: generated_at moves
+      every run, so a textual comparison commits daily with nothing in it.
+    value: ${{ steps.diff.outputs.state_changed }}
+  commit-message:
+    description: >-
+      The message to commit the state file under. Use it rather than composing
+      one: a bootstrap reports zero new by design, so a message assembled from
+      the counts alone announces a two hundred finding baseline as "no change".
+    value: ${{ steps.diff.outputs.commit_message }}
+
+runs:
+  using: 'composite'
+  steps:
+    # No actions/setup-python here. Calling it would change the Python that
+    # every later step in the adopter's job sees, which is not this action's
+    # business. src/ is standard library only and the self-check reports
+    # clearly if the runner's interpreter is too old.
+    - name: Self-check the parser
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+      run: |
+        python3 -m src.selfcheck \
+          --fixture "${{ github.action_path }}/packaging/real_0117.json"
+
+    - name: Install and verify Syft and Grype
+      shell: bash
+      env:
+        SYFT_VERSION: ${{ inputs.syft-version }}
+        GRYPE_VERSION: ${{ inputs.grype-version }}
+      run: |
+        set -euo pipefail
+
+        # Anchore's install.sh is deliberately not used: it has treated a 302
+        # from GitHub's asset CDN as an error rather than following it, which
+        # left the checksum and tar steps running against nothing. Fetching the
+        # tarball directly puts our own curl flags in charge of redirects.
+        retry() {
+          local attempt=1
+          until "$@"; do
+            if [ "$attempt" -ge 3 ]; then
+              echo "::error::failed after 3 attempts: $*"
+              return 1
+            fi
+            echo "attempt ${attempt} failed, retrying in 5s: $*"
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+        }
+
+        install_tool() {
+          local name="$1" version="$2"
+          local tarball="${name}_${version}_linux_amd64.tar.gz"
+          local checksums="${name}_${version}_checksums.txt"
+          local base="https://github.com/anchore/${name}/releases/download/v${version}"
+          local work
+          work="$(mktemp -d)"
+
+          retry curl -fsSL -o "${work}/${tarball}" "${base}/${tarball}"
+          retry curl -fsSL -o "${work}/${checksums}" "${base}/${checksums}"
+
+          # Grep the single line first. `sha256sum -c` over the whole file
+          # would need --ignore-missing, which passes vacuously when the
+          # download produced nothing - exactly the failure being guarded.
+          ( cd "${work}" && grep " ${tarball}$" "${checksums}" | sha256sum -c - )
+
+          tar -xzf "${work}/${tarball}" -C "${work}" "${name}"
+          mkdir -p "${RUNNER_TEMP}/sbom-watchdog/bin"
+          install -m 0755 "${work}/${name}" \
+            "${RUNNER_TEMP}/sbom-watchdog/bin/${name}"
+          rm -rf "${work}"
+        }
+
+        install_tool syft "${SYFT_VERSION#v}"
+        install_tool grype "${GRYPE_VERSION#v}"
+
+        echo "${RUNNER_TEMP}/sbom-watchdog/bin" >> "$GITHUB_PATH"
+
+    - name: Report tool versions
+      shell: bash
+      run: |
+        syft version
+        grype version
+
+    - name: Generate the SBOM
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/sbom-watchdog"
+
+        # A .syft.yaml in the repository being scanned wins; Syft discovers it
+        # without being told. Only when there is none does the action supply
+        # its own default, which carries no repository-specific paths.
+        if [ -f .syft.yaml ] || [ -f .syft.yml ]; then
+          echo "using the repository's own Syft configuration"
+          syft scan dir:. -o "cyclonedx-json=${RUNNER_TEMP}/sbom-watchdog/sbom.cdx.json"
+        else
+          echo "using the configuration shipped with the action"
+          syft scan dir:. \
+            -c "${{ github.action_path }}/packaging/syft.yaml" \
+            -o "cyclonedx-json=${RUNNER_TEMP}/sbom-watchdog/sbom.cdx.json"
+        fi
+
+    - name: Scan the SBOM
+      shell: bash
+      run: |
+        set -euo pipefail
+        grype "sbom:${RUNNER_TEMP}/sbom-watchdog/sbom.cdx.json" \
+          -o json --file "${RUNNER_TEMP}/sbom-watchdog/grype.json"
+
+    - name: Validate the Grype document
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json, os, sys
+
+        path = os.path.join(os.environ["RUNNER_TEMP"], "sbom-watchdog", "grype.json")
+        try:
+            report = json.load(open(path, encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            sys.exit(f"::error::Grype output is not readable JSON: {exc}")
+
+        if not isinstance(report, dict) or "matches" not in report:
+            sys.exit("::error::Grype output has no top-level 'matches' key")
+        if not isinstance(report["matches"], list):
+            sys.exit("::error::Grype 'matches' is not a list")
+
+        print(f"document valid: {len(report['matches'])} matches")
+        PY
+
+    - name: Diff against the previous scan and file issues
+      id: diff
+      shell: bash
+      env:
+        # Through the environment, never as an argument: arguments show up in
+        # process listings and in logs.
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PYTHONPATH: ${{ github.action_path }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        STATE_PATH: ${{ inputs.state-path }}
+        THRESHOLD: ${{ inputs.severity-threshold }}
+        SYFT_VERSION: ${{ inputs.syft-version }}
+      run: |
+        set -euo pipefail
+
+        # Only the exact string 'true' previews. Anything else - including the
+        # empty value a schedule event produces - files for real, because a
+        # scheduled run that quietly does nothing while logging a healthy run
+        # is the failure this tool cannot afford.
+        if [ "${DRY_RUN}" = "true" ]; then
+          issues_flag="--dry-run-issues"
+        else
+          issues_flag="--file-issues"
+        fi
+        echo "issue mode: ${issues_flag}"
+
+        python3 -m src.run \
+          --scan "${RUNNER_TEMP}/sbom-watchdog/grype.json" \
+          --state "${STATE_PATH}" \
+          --write-state \
+          --threshold "${THRESHOLD}" \
+          --repo "${GITHUB_REPOSITORY}" \
+          --syft-version "${SYFT_VERSION#v}" \
+          "${issues_flag}"

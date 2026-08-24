@@ -322,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.message_file).write_text(message + "\n", encoding="utf-8",
                                            newline="\n")
         print(f"commit message: {message}")
+    # Also an output, so an adopter's commit step never rebuilds this
+    # text in shell. That is how a baseline once shipped as "no change
+    # (scan of )": the message is permanent, so it is built in one place.
+    _emit_github_output("commit_message", message)
 
     _emit_github_output("bootstrap", "true" if result.bootstrap else "false")
     _emit_github_output("recorded", str(len(state["findings"])))

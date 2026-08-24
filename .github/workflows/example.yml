@@ -1,0 +1,138 @@
+# The workflow an adopter copies into .github/workflows/ of their own
+# repository. This file is the README's install snippet, so it has to work
+# rather than illustrate.
+#
+# It is not enabled here: this repository scans itself with watchdog.yml, which
+# runs src/ directly. Keeping the two separate means that if the packaged
+# action ever misbehaves, the difference between them is the diagnosis.
+name: sbom-watchdog (example)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Print the issues that would be filed instead of filing them'
+        type: boolean
+        default: true
+  schedule:
+    # Offset off the hour deliberately: every cron on GitHub fires at :00 and
+    # the queue is worst there. GitHub does not adjust for DST, so this drifts
+    # by an hour across the year, which is fine for a daily scan.
+    #
+    # NOTE: GitHub disables scheduled workflows after 60 days without
+    # repository activity. For a watchdog that is backwards - the repository
+    # nobody has touched in two months is the one still shipping a dependency
+    # someone disclosed a CVE against last week. A real finding commits state
+    # and resets the clock, so this partly inoculates itself, but only while it
+    # keeps finding things.
+    - cron: '17 3 * * *'
+
+# issues:write to file and close issues, contents:write for the commit-back
+# below. Nothing else.
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  # The state file is a read-modify-write on a committed file, so two runs must
+  # not interleave. Queue rather than cancel: cancelling throws away a
+  # completed scan.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # A schedule event carries no inputs, so inputs.dry-run is empty. Resolving
+  # it once here means an absent input files for real and only an explicit tick
+  # previews - and the step below and the commit gate read the same value, so
+  # they cannot drift apart.
+  DRY_RUN: ${{ inputs.dry-run || 'false' }}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Full history: the commit-back below rebases onto origin before
+          # pushing, and a depth-1 clone has nothing to rebase onto.
+          fetch-depth: 0
+
+      # A scheduled or dispatched run pins github.sha when it is created, so
+      # checkout can hand the job a tree older than the branch tip - which is
+      # how two runs both decide they are bootstrapping. Re-read just the state
+      # file from the tip.
+      - name: Sync the state file with the branch tip
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "${GITHUB_REF_NAME}"
+          remote_state="origin/${GITHUB_REF_NAME}:.sbom-watchdog/findings.json"
+          if git cat-file -e "${remote_state}" 2>/dev/null; then
+            mkdir -p .sbom-watchdog
+            git show "${remote_state}" > .sbom-watchdog/findings.json
+            echo "state file synced from origin/${GITHUB_REF_NAME}"
+          else
+            echo "no state file on origin yet - this run bootstraps"
+          fi
+
+      - name: Scan for new vulnerabilities
+        id: watchdog
+        uses: Johndenisnyagah/sbom-watchdog@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          dry-run: ${{ env.DRY_RUN }}
+          # Optional, shown with their defaults:
+          # severity-threshold: 'High'
+          # state-path: '.sbom-watchdog/findings.json'
+
+      # The commit belongs to you, not to the action. An action that pushes to
+      # your repository from six pasted lines is the wrong kind of surprise.
+      - name: Commit the state file
+        if: env.DRY_RUN != 'true' && steps.watchdog.outputs.state-changed == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use the action's message rather than composing one: a bootstrap
+          # reports zero new by design, so a message built from the counts
+          # announces a large first baseline as "no change".
+          MESSAGE: ${{ steps.watchdog.outputs.commit-message }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${MESSAGE}" ]; then
+            echo "::error::no commit message from the action; refusing to commit"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # actions/checkout v6 and later no longer persist a credential in
+          # .git/config, so the token is passed explicitly. Copying an older
+          # commit-back pattern fails here, on the last step, after the scan.
+          git remote set-url origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          git add .sbom-watchdog/findings.json
+          if git diff --cached --quiet; then
+            echo "nothing staged; another run already recorded this"
+            exit 0
+          fi
+
+          git commit -m "${MESSAGE}" -m "Run ${GITHUB_RUN_ID} of ${GITHUB_WORKFLOW}."
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          NEW: ${{ steps.watchdog.outputs.new }}
+          RESOLVED: ${{ steps.watchdog.outputs.resolved }}
+          UNCHANGED: ${{ steps.watchdog.outputs.unchanged }}
+          BOOTSTRAP: ${{ steps.watchdog.outputs.bootstrap }}
+        run: |
+          echo "bootstrap: ${BOOTSTRAP}"
+          echo "new: ${NEW}  resolved: ${RESOLVED}  unchanged: ${UNCHANGED}"
