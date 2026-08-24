@@ -85,19 +85,59 @@ def test_history_creates_the_directory(tmp_path):
     assert written.exists()
 
 
-def test_a_second_run_on_the_same_day_replaces_that_day(tmp_path):
-    """The file is named for the day, so two runs on one day are one record.
-    The last scan of the day is the one that stands."""
+def test_a_second_run_on_the_same_day_leaves_the_day_alone(tmp_path):
+    """The first scan of a day writes that day's record; later scans do not
+    touch it. Syft stamps a new serialNumber every run, so rewriting would
+    produce a commit whose entire content is a changed UUID - and would quietly
+    turn the day's record into the last scan of that day, with nothing saying
+    which."""
     sbom = tmp_path / "sbom.json"
     history = tmp_path / "sboms"
 
     sbom.write_text('{"run": 1}', encoding="utf-8")
-    write_sbom_history(sbom, history, "2026-03-14T03:17:00Z")
-    sbom.write_text('{"run": 2}', encoding="utf-8")
-    written = write_sbom_history(sbom, history, "2026-03-14T15:00:00Z")
+    first = write_sbom_history(sbom, history, "2026-03-14T03:17:00Z")
 
+    sbom.write_text('{"run": 2}', encoding="utf-8")
+    second = write_sbom_history(sbom, history, "2026-03-14T15:00:00Z")
+
+    assert first is not None
+    assert second is None, "a later scan the same day rewrote the record"
     assert len(list(history.iterdir())) == 1
-    assert json.loads(written.read_text())["run"] == 2
+    assert json.loads(first.read_text())["run"] == 1
+
+
+def test_a_new_day_is_recorded_even_though_yesterday_exists(tmp_path):
+    sbom = tmp_path / "sbom.json"
+    sbom.write_text("{}", encoding="utf-8")
+    history = tmp_path / "sboms"
+
+    write_sbom_history(sbom, history, "2026-03-14T03:17:00Z")
+    written = write_sbom_history(sbom, history, "2026-03-15T03:17:00Z")
+
+    assert written is not None
+    assert written.name == "2026-03-15.json"
+
+
+def test_the_inventory_is_rewritten_when_it_would_differ(tmp_path):
+    """It describes the current state rather than a dated snapshot, so the
+    latest scan is always the right content - including undoing a hand edit."""
+    destination = tmp_path / "SECURITY-INVENTORY.md"
+    document = state(findings={"a": record()})
+
+    assert write_inventory(destination, document) is not None
+    destination.write_text("someone edited this by hand", encoding="utf-8")
+    assert write_inventory(destination, document) is not None
+    assert destination.read_text(encoding="utf-8").startswith("# Security inventory")
+
+
+def test_the_inventory_is_left_alone_when_already_correct(tmp_path):
+    """Writing identical content is a no-op, not a rewrite. Reporting it as one
+    would tell the caller there is something to commit when there is not."""
+    destination = tmp_path / "SECURITY-INVENTORY.md"
+    document = state(findings={"a": record()})
+
+    write_inventory(destination, document)
+    assert write_inventory(destination, document) is None
 
 
 # --- the inventory, as a document a non-developer reads -------------------

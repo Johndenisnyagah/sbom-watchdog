@@ -106,8 +106,10 @@ outputs:
     value: ${{ steps.diff.outputs.should_commit }}
   sbom-path:
     description: >-
-      Path of the dated SBOM written this run, empty when write-sbom-history is
-      off or the run was a dry run.
+      Path of the dated SBOM written this run. Empty when write-sbom-history
+      is off, the run was a dry run, or the day was already recorded - the
+      first scan of a day writes that day's file and later scans leave it
+      alone.
     value: ${{ steps.diff.outputs.sbom_path }}
   inventory-path:
     description: >-

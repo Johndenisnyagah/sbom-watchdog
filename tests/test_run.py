@@ -482,7 +482,7 @@ def compliance_run(tmp_path, outputs, *, day=None):
     return step_outputs(outputs)
 
 
-def test_a_clean_repository_still_commits_its_daily_sbom(tmp_path, monkeypatch, capsys):
+def test_a_clean_repository_commits_the_first_scan_of_a_day(tmp_path, monkeypatch, capsys):
     outputs = tmp_path / "outputs.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
 
@@ -492,15 +492,25 @@ def test_a_clean_repository_still_commits_its_daily_sbom(tmp_path, monkeypatch, 
     assert first["recorded"] == "0", "this fixture must have no findings"
     assert first["should_commit"] == "true"
 
-    # Same day, same scan, same tooling: the document is identical, so the
-    # vulnerability state has not moved. There is still a file to commit.
-    second = compliance_run(tmp_path, outputs)
-    capsys.readouterr()
 
-    assert second["state_changed"] == "false", (
-        "a clean repository's state never moves - that is the whole problem")
-    assert second["should_commit"] == "true", (
-        "the daily SBOM was written and would never have been committed")
+def test_a_repeat_scan_the_same_day_has_nothing_to_commit(tmp_path, monkeypatch, capsys):
+    """The day is already recorded and the inventory already says what it says,
+    so there is genuinely nothing to write. Before the same-day rule this
+    reported true, on the strength of a rewritten file whose only change was a
+    fresh UUID."""
+    outputs = tmp_path / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(outputs))
+
+    compliance_run(tmp_path, outputs)
+    capsys.readouterr()
+    second = compliance_run(tmp_path, outputs)
+    printed = capsys.readouterr().out
+
+    assert second["state_changed"] == "false"
+    assert second["should_commit"] == "false"
+    assert "already recorded" in printed
+    assert "already up to date" in printed
+    assert second.get("sbom_path", "") == "", "the skipped write reported a path"
 
 
 def test_a_later_day_produces_a_new_dated_sbom_to_commit(tmp_path, monkeypatch, capsys):

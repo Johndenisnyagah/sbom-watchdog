@@ -49,23 +49,26 @@ def sbom_history_path(directory, generated_at: str) -> Path:
     return Path(directory) / f"{generated_at[:10]}.json"
 
 
-def write_sbom_history(sbom: Path, directory, generated_at: str) -> Path:
-    """Copy the scan's SBOM into the dated history.
+def write_sbom_history(sbom: Path, directory, generated_at: str) -> Path | None:
+    """Record today's SBOM, unless today is already recorded.
 
-    Written every day the scan runs, never skipped for being unchanged. A
-    missing file has to mean "no scan ran that day" and nothing else: if it
-    could also mean "the dependencies had not changed", then the trail cannot
-    distinguish a stable project from an abandoned one, which is the single
-    question it exists to answer. GitHub disables scheduled workflows after 60
-    days of inactivity, so "we quietly stopped scanning" is a real way for this
-    to end, not a hypothetical.
+    Returns the path written, or None when the day already had a file and this
+    scan left it alone.
 
-    The document's serialNumber and timestamp differ on every run even when the
-    component list is identical, so byte-comparison would never suppress
-    anything anyway; suppressing would mean comparing components and explaining
-    that rule to whoever is reading the trail.
+    The first scan of a day writes that day's SBOM; later scans the same day
+    skip it. Syft stamps a fresh serialNumber and timestamp on every run, so
+    rewriting would produce a commit whose entire content is a changed UUID -
+    and it would quietly change what the file means, from the day's record to
+    the last scan of that day, with nothing saying which. The run history
+    already records that a later scan happened. The trail records what was
+    there.
+
+    Never skipped for being unchanged, only for the day already being
+    recorded, so a day with no file still means exactly one thing: no scan ran.
     """
     destination = sbom_history_path(directory, generated_at)
+    if destination.exists():
+        return None
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(sbom, destination)
     return destination
@@ -240,12 +243,24 @@ def inventory_markdown(state: dict) -> str:
     return "\n".join(parts)
 
 
-def write_inventory(path, state: dict) -> Path:
-    """Write SECURITY-INVENTORY.md, creating the directory if needed."""
+def write_inventory(path, state: dict) -> Path | None:
+    """Write SECURITY-INVENTORY.md. Returns None when it was already correct.
+
+    Unlike the SBOM history this is not a dated snapshot: it describes the
+    current state, so the latest scan is always the right content and it is
+    rewritten whenever it would differ - including to undo a hand edit.
+
+    Writing content identical to what is already there is not a rewrite, it is
+    a no-op, and reporting it as one would tell the caller there is something
+    to commit when there is not.
+    """
     destination = Path(path)
+    rendered = inventory_markdown(state)
+    if (destination.exists()
+            and destination.read_text(encoding="utf-8") == rendered):
+        return None
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(inventory_markdown(state), encoding="utf-8",
-                           newline="\n")
+    destination.write_text(rendered, encoding="utf-8", newline="\n")
     return destination
 
 

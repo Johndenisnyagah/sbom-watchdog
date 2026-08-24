@@ -329,6 +329,17 @@ Two files from consecutive days differ only in the document's serial number and
 timestamp when nothing changed, which is itself the evidence that nothing
 changed.
 
+The first scan of a day writes that day's file; later scans the same day leave
+it alone. Syft stamps a fresh serial number on every run, so rewriting would
+produce a commit whose entire content is a changed identifier — and it would
+quietly change what the file means, from the day's record to the last scan of
+that day, with nothing saying which. The run history already shows that a later
+scan happened.
+
+`SECURITY-INVENTORY.md` is the opposite, because it is not a dated snapshot: it
+describes the current state, so the newest scan is always the right content and
+it is rewritten whenever it would differ.
+
 ## Operating it
 
 **Scheduled workflows are disabled after 60 days without repository activity.**

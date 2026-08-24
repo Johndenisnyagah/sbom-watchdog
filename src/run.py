@@ -336,14 +336,23 @@ def main(argv: list[str] | None = None) -> int:
         if args.sbom_history:
             written = write_sbom_history(Path(args.sbom), args.sbom_history,
                                          state["generated_at"])
-            print(f"SBOM history: {written}")
-            _emit_github_output("sbom_path", str(written))
-            wrote_files = True
+            if written is None:
+                # The day is already recorded. Rewriting would commit a changed
+                # UUID and turn the day's record into the last scan of that day.
+                print(f"SBOM history: {state['generated_at'][:10]} already "
+                      f"recorded; left as it is")
+            else:
+                print(f"SBOM history: {written}")
+                _emit_github_output("sbom_path", str(written))
+                wrote_files = True
         if args.inventory:
             written = write_inventory(args.inventory, state)
-            print(f"inventory: {written}")
-            _emit_github_output("inventory_path", str(written))
-            wrote_files = True
+            if written is None:
+                print(f"inventory: {args.inventory} already up to date")
+            else:
+                print(f"inventory: {written}")
+                _emit_github_output("inventory_path", str(written))
+                wrote_files = True
 
     message = commit_message(result, state)
     if args.message_file:
