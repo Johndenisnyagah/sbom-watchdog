@@ -45,10 +45,12 @@ inputs:
 
   github-token:
     description: >-
-      Token used to search, file and close issues. Pass
-      ${{ secrets.GITHUB_TOKEN }} explicitly; this action will not reach for a
-      token you did not hand it. Needs issues:write, and contents:read for the
-      checkout.
+      Token used to search, file and close issues. Pass secrets.GITHUB_TOKEN
+      from your workflow explicitly; this action will not reach for a token you
+      did not hand it. Needs issues:write, and contents:read for the checkout.
+      (Written without expression braces on purpose: GitHub evaluates every
+      expression in this file, descriptions included, and the secrets context
+      does not exist inside a composite action.)
     required: true
 
 outputs:

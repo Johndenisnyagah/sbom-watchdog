@@ -1,0 +1,74 @@
+# A smoke test for action.yml, not a scan whose results matter.
+#
+# Two packaging bugs have now shipped past a static file check: a missing path
+# would have been one, and a `secrets` reference inside an input description was
+# the other. Both were invisible to a YAML parser, because PyYAML reads
+# ${{ ... }} as ordinary text while GitHub evaluates every expression in the
+# file - descriptions included - before a single step runs.
+#
+# The only thing that catches that class is GitHub's own template parser, and
+# the only way to reach it is to load the manifest for real. This job does that
+# by calling the action from its own repository with `uses: ./`.
+#
+# It runs in dry-run mode against this repository's own tree, which finds
+# nothing worth filing. That is fine: the assertion is that the manifest loads
+# and every step executes, not that anything was found.
+name: validate action.yml
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  load-the-manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      # `uses: ./` runs the action from this checkout, so the manifest is
+      # parsed by the real thing rather than by a stand-in.
+      - name: Run the local action in dry-run mode
+        id: watchdog
+        uses: ./
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          dry-run: 'true'
+          state-path: ${{ runner.temp }}/validate/findings.json
+
+      - name: Assert the action produced its outputs
+        shell: bash
+        env:
+          NEW: ${{ steps.watchdog.outputs.new }}
+          RESOLVED: ${{ steps.watchdog.outputs.resolved }}
+          UNCHANGED: ${{ steps.watchdog.outputs.unchanged }}
+          BOOTSTRAP: ${{ steps.watchdog.outputs.bootstrap }}
+          STATE_CHANGED: ${{ steps.watchdog.outputs.state-changed }}
+          MESSAGE: ${{ steps.watchdog.outputs.commit-message }}
+        run: |
+          set -euo pipefail
+
+          echo "new=${NEW} resolved=${RESOLVED} unchanged=${UNCHANGED}"
+          echo "bootstrap=${BOOTSTRAP} state-changed=${STATE_CHANGED}"
+          echo "commit-message=${MESSAGE}"
+
+          # An output that arrives empty means the manifest wired it to a step
+          # that did not run or does not exist. Counts are allowed to be zero;
+          # they are not allowed to be absent.
+          for name in NEW RESOLVED UNCHANGED BOOTSTRAP MESSAGE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::output ${name} came back empty"
+              exit 1
+            fi
+          done
+
+          # A dry run must never report anything worth committing.
+          if [ "${STATE_CHANGED}" != "false" ]; then
+            echo "::error::a dry run reported state-changed=${STATE_CHANGED}"
+            exit 1
+          fi
+
+          echo "manifest loaded, every step ran, every output arrived"
