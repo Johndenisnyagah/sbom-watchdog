@@ -113,6 +113,13 @@ pins it by commit SHA, which is what you want in a workflow that has write
 access to your repository: a tag is somebody else's decision to run new code
 there.
 
+`sbom-watchdog@v1` tracks the latest `v1.x`, which is the usual convention for
+a major tag and means you pick up fixes without editing anything. If you would
+rather decide when the code under you changes, pin an immutable tag — `@v1.1`
+— or a commit SHA. `v1` only ever moves forward to a released, backward-
+compatible `v1.x`; a breaking change would be `v2` and would leave `v1` where
+it is.
+
 The commit step is yours rather than the action's, deliberately. An action that
 pushes to your repository from six lines you pasted is the wrong kind of
 surprise, and you should be able to see exactly what it writes and when.

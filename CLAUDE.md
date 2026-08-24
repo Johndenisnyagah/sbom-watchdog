@@ -276,7 +276,11 @@ something an adopter would otherwise have to work out themselves.
 
 **A static file check cannot catch a template error.** PyYAML reads `${{ ... }}` as ordinary text, so a check built on it validates paths, step shells and output wiring and still passes a manifest GitHub refuses to load. Two packaging bugs have now shipped past exactly that gap. `.github/workflows/validate-action.yml` calls the action with `uses: ./`, which forces GitHub's own parser to load the manifest and every step to run. Run it before tagging.
 
-**Moving a released tag was acceptable exactly once.** `v1` was cut, found within the hour to point at a manifest that could not load, and force-moved rather than superseded by `v1.1`. That was defensible only because the sole consumer was this project's own second testbed and no third party had pinned it. It does not set a precedent: once anyone else pins `v1`, moving it silently changes the code under them, which is the supply-chain failure this tool exists to warn about. After that point the answer is a new tag, always.
+**A major tag floats; a version tag never moves.** These are two different acts and the earlier note conflated them.
+
+What was forbidden, and was done exactly once, is force-moving `v1` to hide that the first release was broken: changing what a pin resolves to with no version boundary, so an adopter's pin silently means something different than it did. That is the supply-chain failure this tool exists to warn about, and it does not happen again.
+
+A major tag advancing to a new compatible release is a different act, and it is what anyone pinning a major tag is asking for — it is why the README tells adopters to pin `@v1`. The rule: `v1.0` and `v1.1` are created once and never move. `v1` moves only forward, only to a released `v1.x`, and only when the change is backward-compatible. A breaking change gets `v2` and `v1` stays put.
 
 **The packaged action carries a self-check.** Done: `src/selfcheck.py` parses `packaging/real_0117.json` at startup and asserts 22 findings, failing with the Grype version named. A misparse looks exactly like "no vulnerabilities found", so this is the only thing standing between a schema change and a silently clean scan on an adopter's runner. The sample is shipped under `packaging/` rather than `tests/`, because the action must work from a checkout that has no test directory — which means the file exists twice, and phase 6 part 2 should point the fixture tests at the packaged copy.
 
