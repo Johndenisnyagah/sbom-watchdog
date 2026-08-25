@@ -412,6 +412,20 @@ python -m pytest -q
 ruff check src/ tests/
 ```
 
+Three things the suite is built to guarantee rather than to accumulate. Rules
+are verified by breaking them: where a decision matters, the rule was reverted
+and a test confirmed to fail, so the coverage is demonstrated rather than
+inferred from a green run. The GitHub API tests prove they are offline instead
+of assuming it — `socket.socket` and `socket.create_connection` are poisoned for
+every test in that module, and a test asserts the poison is live, so a code path
+that reached the network would fail loudly rather than pass quietly on one
+machine and break in CI. And `action.yml` is checked as a document GitHub has to
+load, not as YAML: a parser reads `${{ ... }}` as ordinary text while GitHub
+evaluates it, which is how a `v1` shipped that could not load at all. Those
+tests assert the shape of the rules — expressions only in slots meant to hold
+them, contexts only from the set a composite action can resolve — rather than
+any one name that went wrong once.
+
 `CLAUDE.md` is the working agreement: what each module may depend on, why the
 decisions above were made, and what was tried and rejected. `tests/fixtures/`
 holds a fixture per named failure mode, described in its own README.
