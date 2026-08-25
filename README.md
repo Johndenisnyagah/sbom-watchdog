@@ -113,6 +113,11 @@ jobs:
 Run it once from the Actions tab with the dry-run box ticked before you let it
 loose. It will print the issues it would file and write nothing.
 
+Add a `.gitattributes` containing `* text=auto eol=lf` at the same time if you
+do not have one. The state file is written with LF endings and a contributor on
+Windows would otherwise commit it back with CRLF; there is a longer note under
+[Operating it](#operating-it).
+
 `actions/checkout@v7` is written as a tag above for readability. `example.yml`
 pins it by commit SHA, which is what you want in a workflow that has write
 access to your repository: a tag is somebody else's decision to run new code

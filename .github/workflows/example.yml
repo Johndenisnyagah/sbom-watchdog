@@ -5,6 +5,11 @@
 # It is not enabled here: this repository scans itself with watchdog.yml, which
 # runs src/ directly. Keeping the two separate means that if the packaged
 # action ever misbehaves, the difference between them is the diagnosis.
+#
+# One thing to do alongside this, once: add a .gitattributes containing
+# `* text=auto eol=lf`. The state file and the compliance outputs are written
+# with LF endings, and without that attribute a contributor on Windows commits
+# them back with CRLF, showing every line as changed.
 name: sbom-watchdog (example)
 
 on:
