@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-12T10:57:20Z",
+  "generated_at": "2026-10-13T10:42:17Z",
   "tooling": {
     "syft": "1.51.0",
     "grype": "0.117.0",
-    "grype_db_built": "2026-10-12T06:45:22Z",
+    "grype_db_built": "2026-10-13T06:35:20Z",
     "grype_db_schema_version": "v6.1.10"
   },
   "findings": {}
