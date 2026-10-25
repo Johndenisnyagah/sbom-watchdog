@@ -1,5 +1,8 @@
 # sbom-watchdog
 
+[![ci](https://github.com/Johndenisnyagah/sbom-watchdog/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Johndenisnyagah/sbom-watchdog/actions/workflows/ci.yml)
+[![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+
 A GitHub Action that generates a software bill of materials for your repository
 every night, scans it for known vulnerabilities, and opens an issue only for
 findings that were not there yesterday.
@@ -409,8 +412,27 @@ tree.
 ```
 pip install -r requirements-dev.txt
 python -m pytest -q
-ruff check src/ tests/
+python -m ruff check .
 ```
+
+`ci.yml` runs the same two commands on every pull request and every push to
+`main`, on Python 3.11 (the oldest the action supports), 3.12 and 3.14. The
+action itself runs under whatever `python3` the runner provides, so the range
+matters more than any one version. It holds read
+access only and needs no secrets. `validate-action.yml` additionally loads
+`action.yml` through GitHub's own parser whenever something that ships in the
+action changes.
+
+### Updating Syft and Grype
+
+Dependabot keeps the SHA-pinned actions and the development dependencies
+current, weekly and a week behind each release. It cannot see the Syft and
+Grype versions, which are plain strings in `action.yml`, and that is acceptable
+here: a scanner release can change its output format or what it reports, so a
+bump is a reviewed change rather than a background one. To bump either, change
+the default in `action.yml`, re-capture `packaging/real_0117.json` if the Grype
+output format moved, run the suite, and let `validate-action.yml` load the
+result before tagging a release.
 
 Three things the suite is built to guarantee rather than to accumulate. Rules
 are verified by breaking them: where a decision matters, the rule was reverted

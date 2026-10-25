@@ -1,0 +1,40 @@
+# Weekly, one grouped pull request per ecosystem, and a week's wait after any
+# release before proposing it. The wait matters for a supply-chain tool: a
+# compromised release is usually caught and pulled within days, and a bot that
+# proposes it within hours is how it lands.
+#
+# Security updates are not delayed by the cooldown.
+#
+# Not covered: the Syft and Grype versions pinned in action.yml. Those are
+# plain strings, which Dependabot cannot see, and a scanner bump changes what
+# the action reports. They are bumped by hand; see "Updating Syft and Grype"
+# in the README.
+version: 2
+updates:
+  # Covers .github/workflows/ and the composite action.yml at the root, and
+  # keeps the `# vX.Y.Z` comment beside each SHA pin in step.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci
+
+  # requirements-dev.txt: pytest and ruff. Development only; nothing here
+  # ships in the action.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      dev-dependencies:
+        patterns: ['*']
+    commit-message:
+      prefix: deps

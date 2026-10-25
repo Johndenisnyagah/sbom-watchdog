@@ -161,9 +161,10 @@ def test_every_referenced_context_exists_in_a_composite_action():
 # --- keys that are legal in a workflow but not in an action ---------------
 
 def test_no_composite_illegal_keys():
-    """watchdog.yml uses continue-on-error legitimately. Copying that pattern
-    into the action would fail at load, and the two files look alike enough
-    that someone will try."""
+    """A calling workflow can use continue-on-error legitimately - an
+    adopter's commit-back pattern does. Copying that into the action would
+    fail at load, and workflows and actions look alike enough that someone
+    will try."""
     offenders = []
     for line in code_lines():
         for key in COMPOSITE_ILLEGAL_KEYS:

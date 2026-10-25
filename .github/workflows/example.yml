@@ -2,9 +2,10 @@
 # repository. This file is the README's install snippet, so it has to work
 # rather than illustrate.
 #
-# It is not enabled here: this repository scans itself with watchdog.yml, which
-# runs src/ directly. Keeping the two separate means that if the packaged
-# action ever misbehaves, the difference between them is the diagnosis.
+# It is also how this repository scans itself every day, through the published
+# @v1 tag, so the snippet is exercised exactly as an adopter would run it. The
+# unreleased action in this checkout is exercised separately, by
+# validate-action.yml with `uses: ./`.
 #
 # One thing to do alongside this, once: add a .gitattributes containing
 # `* text=auto eol=lf`. The state file and the compliance outputs are written
