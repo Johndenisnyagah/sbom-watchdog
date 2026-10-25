@@ -558,3 +558,23 @@ def test_state_file_keeps_plain_string_sort_for_fixed_in():
     state = state_from_findings({subject.key: subject}, provenance={},
                                 generated_at="2026-10-25T03:00:00Z", tooling={})
     assert state["findings"][subject.key]["fixed_in"] == ["1.2.10-beta.1", "1.2.9"]
+
+
+# --- a pre-release named as the fix is flagged, not quietly recommended ----
+
+@pytest.mark.parametrize(("package_type", "hint"), [
+    ("npm", "`@1.2.10-beta.1`"),
+    ("python", "`--pre`"),
+])
+def test_issue_body_flags_a_pre_release_fix(package_type, hint):
+    subject = finding(package_type=package_type, versions=("1.2.5",),
+                      fixed_in=("1.2.10-beta.1",))
+    _, body, _ = render_issue(subject, {subject.key: subject})
+    assert "`1.2.10-beta.1` is a pre-release" in body
+    assert hint in body
+
+
+def test_issue_body_does_not_flag_a_stable_fix():
+    subject = finding(versions=("1.2.5",), fixed_in=("1.2.10",))
+    _, body, _ = render_issue(subject, {subject.key: subject})
+    assert "pre-release" not in body

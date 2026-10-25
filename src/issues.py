@@ -132,6 +132,29 @@ def highest_version(versions) -> str | None:
     return max(candidates, key=version_key) if candidates else None
 
 
+def is_prerelease(version: str) -> bool:
+    """True for a dev or pre-release version such as 2.0.0-rc.1 or 2.0b1."""
+    return version_key(version)[2] in (0, 1)
+
+
+def prerelease_line(version: str, package_type: str) -> str:
+    """Why naming a pre-release as the fix needs a warning.
+
+    pip installs a pre-release only with --pre or an exact pin, and npm only
+    when the exact version is named. A sentence that just says "upgrade to
+    2.0.0-rc.1" sends the reader to a command that, run the usual way, will
+    not install it, and to a release its maintainers have not called stable.
+    """
+    if package_type == "python":
+        how = f"pip installs it only with `--pre` or an exact pin (`=={version}`)"
+    elif package_type == "npm":
+        how = f"npm installs it only when the exact version is named (`@{version}`)"
+    else:
+        how = "package managers usually skip it unless it is asked for explicitly"
+    return (f"`{version}` is a pre-release: {how}. Check whether a stable "
+            "release with the fix exists before depending on it.")
+
+
 def package_findings(finding: Finding, findings) -> list[Finding]:
     """Every finding in the scan against the same package.
 
@@ -310,6 +333,9 @@ def render_issue(finding: Finding, findings=None,
                            for v in finding.versions):
         guidance.append("This crosses a major version and may require code "
                         "changes.")
+
+    if recommended and is_prerelease(recommended):
+        guidance.append(prerelease_line(recommended, finding.package_type))
 
     links = []
     for identifier in sorted(finding.aliases):
