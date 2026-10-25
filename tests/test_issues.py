@@ -8,11 +8,14 @@ least likely to be noticed, which is exactly why they are covered here.
 """
 import re
 
+import pytest
+
 from src.diff import SEVERITY_ORDER
 from src.issues import (
     KEY_MARKER,
     LABEL,
     advisory_url,
+    close_comment,
     dry_run,
     fixed_in_phrase,
     highest_version,
@@ -458,3 +461,100 @@ def test_no_package_line_for_a_lone_finding():
     scan = package("pycrypto", [("CVE-1", ())])
     _, body, _ = render_issue(scan["CVE-1::python::pycrypto"], scan)
     assert "findings in this scan" not in body
+
+
+# --- version ordering beyond plain dotted numbers -------------------------
+#
+# The original key ranked any non-numeric dot-part below every numeric one,
+# so "10-beta" lost to "9" and 1.2.9 was recommended over 1.2.10-beta.1.
+
+PRE_AND_POST_RELEASE_ORDER = [
+    # (lower, higher)
+    ("1.2.9", "1.2.10-beta.1"),       # npm pre-release on a later patch
+    ("14.2.9", "14.2.10-canary.3"),   # npm canary on a later patch
+    ("1.2.9", "1.2.10rc1"),           # PEP 440 pre-release on a later patch
+    ("2.0.9", "2.0.10rc1"),
+    ("1.0.0", "1.0.1+build.5"),       # semver build metadata is ignored
+    ("1.0.dev0", "1.0a1"),            # PEP 440: dev < pre-release
+    ("1.0.dev0", "1.0"),              # PEP 440: dev < release
+    ("2.0", "1!1.0"),                 # PEP 440 epoch dominates
+    ("1.2.9", "v1.2.10"),             # a leading v is not a word
+    # already right on main; kept so the fix cannot regress them
+    ("1.2.10-beta.1", "1.2.10"),
+    ("1.2.10-beta.2", "1.2.10-beta.11"),
+    ("15.0.0-canary.9", "15.0.0-canary.10"),
+    ("2.0a1", "2.0b1"),
+    ("2.0b1", "2.0rc1"),
+    ("1.0", "1.0.post1"),
+    ("1.0.post1", "1.0.1"),
+    ("1.0.9", "1.0.10.post1"),
+]
+
+
+@pytest.mark.parametrize(("lower", "higher"), PRE_AND_POST_RELEASE_ORDER)
+def test_version_key_orders_pre_and_post_releases(lower, higher):
+    assert version_key(lower) < version_key(higher)
+
+
+@pytest.mark.parametrize(("left", "right"), [
+    ("1.0", "1.0.0"),
+    ("1.0.0+abc", "1.0.0"),
+    ("v1.2.3", "1.2.3"),
+])
+def test_version_key_treats_spellings_of_one_version_as_equal(left, right):
+    assert version_key(left) == version_key(right)
+
+
+def test_highest_version_does_not_recommend_an_older_release_over_a_pre_release():
+    """The reported bug, end to end through max()."""
+    assert highest_version(["1.2.10-beta.1", "1.2.9"]) == "1.2.10-beta.1"
+    assert highest_version(["2.0.10rc1", "2.0.9"]) == "2.0.10rc1"
+
+
+def test_version_key_never_raises_on_odd_strings():
+    odd = ["latest", "", "1:2.3-4", "5.3.10.RELEASE", "1!2.0+x", "V1.0", "1.0-"]
+    for a in odd:
+        for b in odd + ["1.0"]:
+            assert isinstance(version_key(a) < version_key(b), bool)
+
+
+def test_issue_body_names_the_pre_release_as_the_highest_fix():
+    scan = {}
+    for cve, fix in (("CVE-2099-0001", "1.2.9"), ("CVE-2099-0002", "1.2.10-beta.1")):
+        scan[f"{cve}::npm::examplepkg"] = finding(
+            key=f"{cve}::npm::examplepkg", id=cve, aliases=frozenset({cve}),
+            package_name="examplepkg", package_type="npm", versions=("1.2.5",),
+            fixed_in=(fix,))
+    _, body, _ = render_issue(scan["CVE-2099-0001::npm::examplepkg"], scan)
+    assert "highest fix version among them is 1.2.10-beta.1" in body
+
+
+def test_close_comment_names_the_highest_fix():
+    subject = finding(fixed_in=("1.2.10-beta.1", "1.2.9"))
+    assert "published in 1.2.10-beta.1." in close_comment(subject)
+
+
+@pytest.mark.parametrize(("installed", "fix"), [
+    ("1.2.3", "v1.3.0"),     # a v prefix on one side only is not a major jump
+    ("1!2.0", "1!2.5"),      # same epoch, same major
+])
+def test_major_jump_is_not_flagged_for_spelling_differences(installed, fix):
+    subject = finding(versions=(installed,), fixed_in=(fix,))
+    _, body, _ = render_issue(subject, {subject.key: subject})
+    assert "crosses a major version" not in body
+
+
+def test_major_jump_is_flagged_into_a_major_pre_release():
+    subject = finding(versions=("1.9.0",), fixed_in=("2.0.0-rc.1",))
+    _, body, _ = render_issue(subject, {subject.key: subject})
+    assert "crosses a major version" in body
+
+
+def test_state_file_keeps_plain_string_sort_for_fixed_in():
+    """CLAUDE.md: the state file sorts fixed_in as plain strings. Changing that
+    to natural order would rewrite every adopter's committed file once."""
+    from src.state import state_from_findings
+    subject = finding(fixed_in=("1.2.9", "1.2.10-beta.1"))
+    state = state_from_findings({subject.key: subject}, provenance={},
+                                generated_at="2026-10-25T03:00:00Z", tooling={})
+    assert state["findings"][subject.key]["fixed_in"] == ["1.2.10-beta.1", "1.2.9"]
