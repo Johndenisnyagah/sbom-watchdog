@@ -19,11 +19,24 @@ on:
   workflow_dispatch:
   # A check that only runs when someone remembers to run it caught nothing on
   # the day it was needed. Anything that changes what the manifest loads or
-  # what it ships gets checked automatically.
+  # what it ships gets checked automatically. src/ ships inside the action, so
+  # it counts.
+  #
+  # Pull requests from forks are safe here: the pull_request event hands them a
+  # read-only token, and a dry run makes no GitHub API calls and writes no
+  # state. pull_request_target must never be used, because it would run the
+  # fork's src/ with this repository's write token.
   push:
     paths:
       - 'action.yml'
       - 'packaging/**'
+      - 'src/**'
+      - '.github/workflows/validate-action.yml'
+  pull_request:
+    paths:
+      - 'action.yml'
+      - 'packaging/**'
+      - 'src/**'
       - '.github/workflows/validate-action.yml'
 
 permissions:
