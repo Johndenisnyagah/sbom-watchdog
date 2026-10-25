@@ -18,6 +18,7 @@ object, and that is the part most likely to go wrong.
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -77,26 +78,52 @@ def advisory_url(identifier: str) -> str | None:
     return None
 
 
+_RELEASE = re.compile(r"(\d+(?:\.\d+)*)(.*)")
+_TOKEN = re.compile(r"\d+|[a-z]+")
+
+
+def _suffix_rank(suffix: str) -> int:
+    """dev < pre-release < release < post-release."""
+    word = suffix.lstrip("-_.")
+    if not word:
+        return 2
+    if word.startswith("post"):
+        return 3
+    if word.startswith("dev"):
+        return 0
+    return 1
+
+
 def version_key(version: str) -> tuple:
-    """A sort key that orders 1.26.9 before 1.26.10.
+    """A sort key for picking the highest fix version.
 
-    CLAUDE.md deferred this until something compared versions semantically.
-    Something does now: picking the highest fix across a package's findings.
-    Plain string sort puts "1.26.10" before "1.26.9" and would recommend an
-    older version than the one that actually fixes everything.
-
-    Hand-rolled and standard library only. Split on dots; numeric parts compare
-    as integers, non-numeric parts as text and always lower, so 2.0 sorts above
-    2.0rc1. A shorter version sorts below a longer one sharing its prefix, so
-    1.26 is below 1.26.1.
+    Handles the shapes PyPI and npm advisories carry, not all of PEP 440 or
+    semver: a leading v is dropped, +build / +local metadata is ignored, a
+    PEP 440 epoch (1!2.0) dominates, trailing .0 parts do not count, and
+    whatever follows the dotted numeric release is ranked dev < pre-release <
+    release < post-release, then compared token by token so beta.2 < beta.11.
+    Not handled: Debian/RPM epochs and revisions, Maven qualifiers, PEP 440
+    implicit post-releases (1.0-1), semver numeric-before-alphanumeric
+    identifier precedence, and PEP 440 alternate spellings (c, pre, preview).
     """
-    key = []
-    for part in version.split("."):
-        if part.isdigit():
-            key.append((1, int(part), ""))
-        else:
-            key.append((0, 0, part))
-    return tuple(key)
+    text = version.strip().lower()
+    if text[:1] == "v" and text[1:2].isdigit():
+        text = text[1:]
+    text = text.split("+", 1)[0]
+    epoch = 0
+    head, bang, rest = text.partition("!")
+    if bang and head.isdigit():
+        epoch, text = int(head), rest
+    match = _RELEASE.fullmatch(text)
+    if not match:
+        return (epoch, (), -1, ((1, 0, text),))
+    release = [int(part) for part in match.group(1).split(".")]
+    while len(release) > 1 and release[-1] == 0:
+        release.pop()
+    suffix = match.group(2)
+    tokens = tuple((0, int(t), "") if t.isdigit() else (1, 0, t)
+                   for t in _TOKEN.findall(suffix))
+    return (epoch, tuple(release), _suffix_rank(suffix), tokens)
 
 
 def highest_version(versions) -> str | None:
@@ -120,8 +147,9 @@ def package_findings(finding: Finding, findings) -> list[Finding]:
     ]
 
 
-def _major(version: str) -> str:
-    return version.split(".", 1)[0]
+def _major(version: str) -> tuple:
+    epoch, release, _, _ = version_key(version)
+    return (epoch, release[:1])
 
 
 def fixed_in_phrase(versions: tuple[str, ...]) -> str:
