@@ -99,7 +99,31 @@ def _severity_table(records: list[dict]) -> str:
     return "\n".join(["| Severity | Count |", "| --- | ---: |", *rows])
 
 
-def _finding_rows(records: list[dict]) -> str:
+# Written for a reader who knows the language a component is written in, not
+# the scanner's package-type vocabulary.
+ECOSYSTEM_NAMES = {
+    "python": "Python (PyPI)",
+    "npm": "JavaScript (npm)",
+}
+
+
+def _ecosystem(record: dict) -> str:
+    kind = str((record.get("package") or {}).get("type") or "")
+    return ECOSYSTEM_NAMES.get(kind, kind or "unknown")
+
+
+def _needs_ecosystem(records: list[dict]) -> bool:
+    """True when the inventory spans more than one ecosystem.
+
+    `requests` on PyPI and `requests` on npm are unrelated packages, and two
+    rows that only say `requests` read as one. A single-ecosystem inventory
+    leaves the column out, so a Python-only adopter's committed file does not
+    change.
+    """
+    return len({_ecosystem(r) for r in records}) > 1
+
+
+def _finding_rows(records: list[dict], with_ecosystem: bool = False) -> str:
     rows = []
     for record in sorted(records, key=lambda r: (
             SEVERITY_ORDER.index(r.get("severity", "Unknown")),
@@ -107,16 +131,32 @@ def _finding_rows(records: list[dict]) -> str:
         package = record.get("package") or {}
         versions = ", ".join(package.get("versions") or []) or "unknown"
         fixed = ", ".join(record.get("fixed_in") or []) or "none published"
+        ecosystem = f" {_ecosystem(record)} |" if with_ecosystem else ""
         rows.append(
-            f"| {package.get('name', '')} | {versions} | "
+            f"| {package.get('name', '')} |{ecosystem} {versions} | "
             f"{record.get('severity', 'Unknown')} | {record.get('id', '')} | "
             f"{fixed} |"
         )
-    return "\n".join([
-        "| Package | Version in use | Severity | Advisory | Fixed in |",
-        "| --- | --- | --- | --- | --- |",
-        *rows,
-    ])
+    header = ("| Package | Ecosystem | Version in use | Severity | Advisory | Fixed in |"
+              if with_ecosystem else
+              "| Package | Version in use | Severity | Advisory | Fixed in |")
+    divider = "| --- " * header.count(" | ") + "| --- |"
+    return "\n".join([header, divider, *rows])
+
+
+def _resolved_rows(records: list[dict], with_ecosystem: bool = False) -> str:
+    rows = []
+    for r in sorted(records, key=lambda r: str(r.get("resolved_on"))):
+        ecosystem = f" {_ecosystem(r)} |" if with_ecosystem else ""
+        rows.append(
+            f"| {(r.get('package') or {}).get('name', '')} |{ecosystem} "
+            f"{r.get('severity', '')} | {r.get('id', '')} | "
+            f"{_long_date(str(r.get('resolved_on') or ''))} |")
+    header = ("| Package | Ecosystem | Severity | Advisory | Resolved on |"
+              if with_ecosystem else
+              "| Package | Severity | Advisory | Resolved on |")
+    divider = "| --- " * header.count(" | ") + "| --- |"
+    return "\n".join([header, divider, *rows])
 
 
 def inventory_markdown(state: dict) -> str:
@@ -125,6 +165,7 @@ def inventory_markdown(state: dict) -> str:
     tooling = state.get("tooling") or {}
     current, resolved = _open_and_resolved(state)
 
+    with_ecosystem = _needs_ecosystem(current + resolved)
     awaiting = [r for r in current if _has_fix(r)]
     no_fix = [r for r in current if not _has_fix(r)]
 
@@ -183,12 +224,12 @@ def inventory_markdown(state: dict) -> str:
                     f"one."
                 ),
                 "",
-                _finding_rows(no_fix),
+                _finding_rows(no_fix, with_ecosystem),
             ]
         else:
             parts.append(
                 "Every open vulnerability has a published fix available.")
-        parts += ["", "### All open vulnerabilities", "", _finding_rows(current)]
+        parts += ["", "### All open vulnerabilities", "", _finding_rows(current, with_ecosystem)]
     else:
         parts.append(
             "No known vulnerabilities are open. Every component this project "
@@ -205,14 +246,7 @@ def inventory_markdown(state: dict) -> str:
                 f"away."
             ),
             "",
-            "\n".join([
-                "| Package | Severity | Advisory | Resolved on |",
-                "| --- | --- | --- | --- |",
-                *[f"| {(r.get('package') or {}).get('name', '')} | "
-                  f"{r.get('severity', '')} | {r.get('id', '')} | "
-                  f"{_long_date(str(r.get('resolved_on') or ''))} |"
-                  for r in sorted(resolved, key=lambda r: str(r.get("resolved_on")))],
-            ]),
+            _resolved_rows(resolved, with_ecosystem),
         ]
     else:
         parts.append(
