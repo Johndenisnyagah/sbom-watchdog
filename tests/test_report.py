@@ -35,11 +35,12 @@ def state(**overrides) -> dict:
 
 
 def record(name="urllib3", severity="High", identifier="CVE-1",
-           fixed_in=("2.0",), resolved_on=None, versions=("1.0",)) -> dict:
+           fixed_in=("2.0",), resolved_on=None, versions=("1.0",),
+           package_type="python") -> dict:
     return {
         "id": identifier,
         "aliases": [identifier],
-        "package": {"name": name, "type": "python", "versions": list(versions)},
+        "package": {"name": name, "type": package_type, "versions": list(versions)},
         "severity": severity,
         "fixed_in": list(fixed_in),
         "fix_state": "fixed" if fixed_in else "not-fixed",
@@ -272,3 +273,51 @@ def test_renders_from_the_state_fixtures(fixture):
     rendered = inventory_markdown(document)
     assert rendered.startswith("# Security inventory")
     assert "## How this was checked" in rendered
+
+
+# --- more than one ecosystem ----------------------------------------------
+#
+# `requests` on PyPI and `requests` on npm are unrelated packages. Without a
+# column naming the ecosystem, the inventory showed two identical-looking rows.
+
+def two_ecosystems():
+    return state(findings={
+        "CVE-1::python::requests": record(name="requests", identifier="CVE-1"),
+        "CVE-2::npm::requests": record(name="requests", identifier="CVE-2",
+                                       package_type="npm"),
+        "CVE-3::npm::left-pad": record(name="left-pad", identifier="CVE-3",
+                                       package_type="npm",
+                                       resolved_on="2026-08-20"),
+    })
+
+
+def test_open_rows_name_the_ecosystem_when_there_is_more_than_one():
+    rendered = inventory_markdown(two_ecosystems())
+    assert "| Package | Ecosystem | Version in use |" in rendered
+    assert "| requests | Python (PyPI) |" in rendered
+    assert "| requests | JavaScript (npm) |" in rendered
+
+
+def test_resolved_rows_name_the_ecosystem_too():
+    rendered = inventory_markdown(two_ecosystems())
+    assert "| Package | Ecosystem | Severity | Advisory | Resolved on |" in rendered
+    assert "| left-pad | JavaScript (npm) |" in rendered
+
+
+def test_a_single_ecosystem_inventory_is_unchanged():
+    """Python-only adopters must not see their committed inventory rewritten."""
+    rendered = inventory_markdown(state(findings={
+        "CVE-1::python::urllib3": record(),
+        "CVE-2::python::pyyaml": record(name="pyyaml", identifier="CVE-2",
+                                        resolved_on="2026-08-20"),
+    }))
+    assert "Ecosystem" not in rendered
+    assert "| Package | Version in use | Severity | Advisory | Fixed in |" in rendered
+
+
+def test_an_unknown_ecosystem_is_shown_as_reported():
+    rendered = inventory_markdown(state(findings={
+        "CVE-1::python::a": record(name="a"),
+        "CVE-2::gem::b": record(name="b", identifier="CVE-2", package_type="gem"),
+    }))
+    assert "| b | gem |" in rendered
