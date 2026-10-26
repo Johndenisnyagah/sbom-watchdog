@@ -2,6 +2,7 @@
 
 [![ci](https://github.com/Johndenisnyagah/sbom-watchdog/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Johndenisnyagah/sbom-watchdog/actions/workflows/ci.yml)
 [![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![live demo: daily scan](https://github.com/Johndenisnyagah/watchdog-testbed/actions/workflows/watchdog.yml/badge.svg)](https://github.com/Johndenisnyagah/watchdog-testbed/actions/workflows/watchdog.yml)
 
 A GitHub Action that generates a software bill of materials for your repository
 every night, scans it for known vulnerabilities, and opens an issue only for
@@ -12,9 +13,22 @@ hard part is not producing two hundred issues on the first run and then a
 duplicate set every night after. This one keeps a committed record of what it
 has already told you about, and stays quiet about the rest.
 
+**Live demo:** [watchdog-testbed](https://github.com/Johndenisnyagah/watchdog-testbed),
+a deliberately vulnerable repository this action has scanned every day since
+August 2026 ·
+[issues it filed](https://github.com/Johndenisnyagah/watchdog-testbed/issues?q=is%3Aissue+author%3Aapp%2Fgithub-actions) ·
+[daily runs](https://github.com/Johndenisnyagah/watchdog-testbed/actions/workflows/watchdog.yml) ·
+[security inventory](https://github.com/Johndenisnyagah/watchdog-testbed/blob/main/SECURITY-INVENTORY.md) ·
+[SBOM history](https://github.com/Johndenisnyagah/watchdog-testbed/tree/main/sboms).
+Its README explains which issues were seeded on purpose and which came from
+vulnerabilities published after the scanning started — issues
+[#10](https://github.com/Johndenisnyagah/watchdog-testbed/issues/10) and
+[#11](https://github.com/Johndenisnyagah/watchdog-testbed/issues/11), filed on
+1 October 2026 for a dependency that had been clean the day before.
+
 ## What you get
 
-This is a real issue it filed, against a repository pinned to `urllib3 1.26.17`:
+This is a real issue it filed on the testbed, while it was pinned to `urllib3 1.26.17`:
 
 > **High: CVE-2026-21441 in urllib3 [CVE-2026-21441::python::urllib3]**
 > `sbom-watchdog` `severity:high`
