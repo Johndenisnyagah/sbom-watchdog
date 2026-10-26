@@ -274,7 +274,7 @@ runs:
         fi
         echo "issue mode: ${issues_flag}"
 
-        # Both compliance outputs are opt-in, so the flags are only passed
+        # Both evidence files are opt-in, so the flags are only passed
         # when asked for. run.py writes nothing it was not given a path for.
         extra=()
         if [ "${WRITE_SBOM_HISTORY}" = "true" ]; then

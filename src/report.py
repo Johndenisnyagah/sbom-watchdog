@@ -1,4 +1,4 @@
-"""The compliance outputs: a dated SBOM history and SECURITY-INVENTORY.md.
+"""The evidence files: a dated SBOM history and SECURITY-INVENTORY.md.
 
 Two different documents for two different readers.
 

@@ -8,7 +8,7 @@
 # validate-action.yml with `uses: ./`.
 #
 # One thing to do alongside this, once: add a .gitattributes containing
-# `* text=auto eol=lf`. The state file and the compliance outputs are written
+# `* text=auto eol=lf`. The state file and the evidence files are written
 # with LF endings, and without that attribute a contributor on Windows commits
 # them back with CRLF, showing every line as changed.
 name: sbom-watchdog (example)
@@ -129,7 +129,7 @@ jobs:
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           git add .sbom-watchdog/findings.json
-          # Only present if you turned the compliance outputs on. `git add` on a
+          # Only present if you turned the evidence files on. `git add` on a
           # path that does not exist is an error, so ask first.
           if [ -d sboms ]; then git add sboms; fi
           if [ -f SECURITY-INVENTORY.md ]; then git add SECURITY-INVENTORY.md; fi

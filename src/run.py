@@ -328,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     # The workflow builds its commit message from these rather than parsing
     # anything back out of the document.
-    # Compliance outputs, both opt-in. Skipped on a dry run for the same
+    # Evidence files, both opt-in. Skipped on a dry run for the same
     # reason the state write is: a preview that leaves files behind in
     # somebody's repository is not a preview.
     wrote_files = False
