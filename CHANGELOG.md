@@ -18,6 +18,8 @@ released and compatible `v1.x`.
   a section on why this tool exists next to Dependabot alerts.
 - README: a "How this was built" note on AI assistance.
 - This changelog.
+- `SECURITY.md`: supported versions, how to report a vulnerability privately,
+  and what is in scope.
 
 ### Changed
 - The README no longer calls the inventory and SBOM files "the compliance
