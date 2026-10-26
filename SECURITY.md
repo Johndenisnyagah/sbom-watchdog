@@ -15,7 +15,7 @@ Please do **not** open a public issue. Report privately through GitHub:
 
 Include what you found, how to reproduce it, and the version or commit you
 tested. This is a one-person project, maintained alongside study, so reports
-are handled on a best-effort basis: I aim to acknowledge a report within 7
+are handled on a best-effort basis: I aim to acknowledge a report within 14
 days and will keep you updated until it is fixed or closed. With your
 agreement, you will be credited in the advisory.
 
