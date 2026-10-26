@@ -103,7 +103,7 @@ jobs:
           git remote set-url origin \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git add .sbom-watchdog/findings.json
-          # Only present if you turned the compliance outputs on. `git add` on a
+          # Only present if you turned the evidence files on. `git add` on a
           # path that does not exist is an error, so ask first.
           if [ -d sboms ]; then git add sboms; fi
           if [ -f SECURITY-INVENTORY.md ]; then git add SECURITY-INVENTORY.md; fi
@@ -244,7 +244,7 @@ exists, every identifier ever seen is kept as an alias, and a finding whose key
 changes because a CVE was assigned overnight is matched back to its old record
 by alias overlap.
 
-## The compliance output
+## The evidence files
 
 Two files, both off by default, because an action that starts creating files in
 your repository after you pinned a version is a bad surprise. Turn them on with
@@ -252,8 +252,10 @@ your repository after you pinned a version is a bad surprise. Turn them on with
 the same step that commits the state file.
 
 `SECURITY-INVENTORY.md` is written for whoever asks you what is in your
-software — a procurement reviewer, an auditor, a customer's security
-questionnaire. It deliberately contains no scanner vocabulary. This is the real
+software and what you know about its vulnerabilities — a procurement reviewer,
+an auditor, a customer's security questionnaire. It is a record of monitoring,
+not a certificate: it says what the scanner reported and when, not that the
+software is safe. It deliberately contains no scanner vocabulary. This is the real
 thing, from a repository with 34 open findings:
 
 > # Security inventory
@@ -309,7 +311,7 @@ thing, from a repository with 34 open findings:
 > | Vulnerabilities identified by | Grype 0.117.0 |
 > | Vulnerability data published on | 24 August 2026 |
 
-The "no fix available" split is the part an auditor cares about. A package
+The "no fix available" split is the part a reviewer will ask about. A package
 awaiting an upgrade is scheduled work; a package with no published fix is a
 decision about whether to keep depending on it at all, and those are different
 answers to give someone.
@@ -329,9 +331,11 @@ The reason is that a missing file has to mean one thing. If it could mean
 either "no scan ran" or "nothing had changed", then the trail cannot distinguish
 a stable project from an abandoned one — and since GitHub disables scheduled
 workflows after 60 days of inactivity, going quiet is a realistic way for this
-to end. An auditor asking "prove you generated an inventory on 14 March" is
-answered by `sboms/2026-03-14.json`, and answering instead with a
-de-duplication rule they have to take on trust is a worse story.
+to end. A reviewer asking "show me you checked your dependencies on 14 March"
+is answered by `sboms/2026-03-14.json`, and answering instead with a
+de-duplication rule they have to take on trust is a worse story. What the file
+proves is that a scan ran that day and what the repository declared; it does
+not prove what you shipped.
 
 Two files from consecutive days differ only in the document's serial number and
 timestamp when nothing changed, which is itself the evidence that nothing
@@ -347,6 +351,21 @@ scan happened.
 `SECURITY-INVENTORY.md` is the opposite, because it is not a dated snapshot: it
 describes the current state, so the newest scan is always the right content and
 it is rewritten whenever it would differ.
+
+### What the SBOM is and is not
+
+It is a *source* SBOM, in CISA's terms: Syft reads the manifests and lockfiles
+in your repository, not a built or installed artefact. On the testbed it lists
+34 components, each with a name, version and package URL. Licences are present
+for the 26 npm packages only; there are no file hashes, no supplier or creator
+details, and Python packages appear without their own dependencies, because a
+`requirements.txt` does not record them. GitHub Actions used by the workflow are
+listed too, although they never ship.
+
+That is useful for knowing what you depend on and for matching it against
+vulnerability databases. It is not the SBOM a manufacturer would hand over with
+a product: it meets only part of what BSI TR-03183-2 (version 2.1.0) asks for,
+which includes hashes, creator details and complete dependency relationships.
 
 ## Operating it
 
@@ -381,6 +400,27 @@ change and a report of no vulnerabilities that you would have believed.
 **Closing an issue is safe.** The issue number is kept in the state file, so
 nothing refiles it. Closing does not mark the finding resolved; only the
 dependency no longer being reported does that.
+
+## The Cyber Resilience Act
+
+The EU Cyber Resilience Act (Regulation (EU) 2024/2847) places obligations on
+manufacturers of products with digital elements. sbom-watchdog does not make a
+product compliant. It helps produce evidence for part of the vulnerability
+handling those manufacturers have to do.
+
+| Obligation | What this action does |
+| --- | --- |
+| Annex I Part II (1): identify and document components and vulnerabilities, including an SBOM | Supports it: a daily CycloneDX SBOM and vulnerability scan |
+| Annex I Part II (2), (3): remediate without delay; test regularly | Partly: records when each finding appeared and was resolved. Fixing and testing are yours. |
+| Art. 13(5), 13(8): due diligence on third-party components; handle vulnerabilities over the support period | Helps produce evidence: the committed findings record and the dated SBOMs |
+| Art. 14: report actively exploited vulnerabilities and severe incidents to ENISA (24 hours for an early warning) | Not covered. A scanner match does not mean a vulnerability is actively exploited, and nothing is reported anywhere. |
+| Annex I Part II (4), (5), (7), (8): public disclosure, a disclosure policy, secure update distribution, free security updates | Not covered |
+| Art. 13(13): keep technical documentation for at least 10 years | Not covered. A git repository is not a retention system. |
+
+The SBOM it produces is a source SBOM with known gaps (see
+[What the SBOM is and is not](#what-the-sbom-is-and-is-not)). The Act does not
+require SBOMs to be published; committing them to a public repository is your
+choice. This table paraphrases the regulation and is not legal advice.
 
 ## Scope
 
