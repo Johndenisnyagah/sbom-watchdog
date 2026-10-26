@@ -65,3 +65,12 @@ def test_the_sbom_is_described_with_its_gaps():
 
 def test_the_evidence_files_heading_replaced_the_old_one():
     assert "## The evidence files" in text()
+
+
+def test_the_dependabot_comparison_says_where_dependabot_is_better():
+    """The section exists to be fair. If it stops naming what Dependabot does
+    that this tool does not, it has turned into a sales pitch."""
+    readme = prose()
+    assert "## Why not Dependabot alerts?" in text()
+    assert "Use them as well" in readme
+    assert "fixes nothing" in readme

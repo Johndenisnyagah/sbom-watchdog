@@ -415,6 +415,30 @@ change and a report of no vulnerabilities that you would have believed.
 nothing refiles it. Closing does not mark the finding resolved; only the
 dependency no longer being reported does that.
 
+## Why not Dependabot alerts?
+
+Use them as well; they are on for the testbed too. Dependabot alerts are free on
+every repository, cost no CI minutes, are maintained by GitHub, flag malicious
+packages, and can open a pull request that fixes the problem. sbom-watchdog
+fixes nothing.
+
+It answers a different question: what did we know, and when? Dependabot alerts
+live in the Security tab, visible to administrators, people with write access
+and anyone granted access explicitly. sbom-watchdog puts findings in the issue
+tracker, where anyone who can read issues can follow them, and in git: a
+committed findings record, a dated SBOM per day and an inventory written for
+people who are not developers, all readable in a diff and kept with the
+repository. On a public repository that also means the issues are public, which
+is a choice to make deliberately.
+
+It matches against Grype's database, which includes NVD records that Dependabot
+does not alert on until GitHub has reviewed the advisory, so the two will
+sometimes disagree. Scanner actions such as `anchore/scan-action` run Grype too,
+but fail a build or upload results rather than keeping a record between runs,
+so every run reports everything again.
+
+The cost is a daily job, a second set of notifications, and no fixes.
+
 ## The Cyber Resilience Act
 
 The EU Cyber Resilience Act (Regulation (EU) 2024/2847) places obligations on
