@@ -43,3 +43,9 @@ Severity ratings are chosen to exercise the threshold logic and deliberately do 
 It lives under `packaging/` rather than here because the composite action bundles it and must work from a checkout with no test directory. There is exactly one copy on purpose. Two would let the action's startup self-check and this suite assert against different bytes, which is how a packaged action passes its own check while the parser has drifted.
 
 `test_diff.py::test_parses_real_grype_output` and `test_run.py` both read it from there. It is captured, not generated: `build_fixtures.py` neither overwrites nor recreates it. Replacing it means re-running Syft and Grype against the same pinned requirements and scrubbing the paths again.
+
+## The npm capture
+
+`grype/real_python_npm_0117.json` is genuine Grype 0.117.0 output from the public testbed on 2026-10-26: 19 Python findings and 6 npm findings (`@babel/traverse`, `minimist` arriving through `mkdirp`, `node-fetch`, `semver`). The only edit is `/home/runner/work/_temp/sbom-watchdog/grype.json` scrubbed to `/src/grype.json`; it is re-serialised through `json.dumps(indent=2)` like the Python sample, and parses to the same findings as the raw file.
+
+It guards what fixtures 10 and 11 could not, because they are reconstructions that carry Python matcher details under an npm type: a scoped name end to end, a transitive dependency, two findings on one package, a mixed inventory, and the documented `0.x` gap. Unlike `packaging/real_0117.json` it is not shipped with the action. `tests/test_real_npm.py` reads it.

@@ -384,10 +384,23 @@ dependency no longer being reported does that.
 
 ## Scope
 
-One repository, scanned as a whole. Whatever ecosystems Syft detects in it —
-this has been exercised against Python, and the identity rules are written so
-that a second ecosystem cannot collide with the first, but only Python has been
-run in anger.
+One repository, scanned as a whole, in whatever ecosystems Syft detects in it.
+Two have been run in anger: Python and npm, both on the public
+[testbed](https://github.com/Johndenisnyagah/watchdog-testbed), and genuine
+Grype output from each is part of the test suite. Other ecosystems Syft
+supports should work, because nothing in the identity rules or the issue text
+is specific to one, but they have not been exercised.
+
+For npm, Syft reads `package-lock.json`; a `package.json` on its own produces
+no components. Syft also leaves `devDependencies` out by default, so a
+vulnerable build tool listed there is not reported unless your `.syft.yaml`
+sets `javascript.include-dev-dependencies: true`.
+
+Version comparison, used to name the highest fix and to warn about a major
+version jump, covers the shapes PyPI and npm advisories carry rather than all
+of PEP 440 or SemVer. One gap worth knowing for npm: an upgrade from `0.0.8`
+to `0.2.4` is not flagged as breaking, though SemVer treats a `0.x` minor bump
+as one.
 
 Issues are filed for findings that are new, or that crossed the severity
 threshold since the last run because a rating changed. A finding that changes in
