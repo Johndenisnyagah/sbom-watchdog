@@ -8,6 +8,12 @@ A GitHub Action that generates a software bill of materials for your repository
 every night, scans it for known vulnerabilities, and opens an issue only for
 findings that were not there yesterday.
 
+
+
+https://github.com/user-attachments/assets/b6c6150d-9910-4392-9654-61d4cda20512
+
+
+
 The "only" is the whole point. Running a scanner on a schedule is easy; the
 hard part is not producing two hundred issues on the first run and then a
 duplicate set every night after. This one keeps a committed record of what it
