@@ -543,10 +543,15 @@ def find_existing_issue(repo: str, key: str, token: str) -> int | None:
         params={"q": f'repo:{repo} is:issue is:open in:title "{key}"',
                 "per_page": 20},
     )
+    # Match the bracketed key render_issue puts at the end of every title, not
+    # the bare key. A bare substring test lets the key for `lodash` match an
+    # open `lodash.set` issue, which records this finding as filed when it is
+    # not. The closing bracket is what makes the match exact.
+    marker = f"[{key}]"
     for item in response.json().get("items", []):
         if item.get("state") not in (None, "open"):
             continue
-        if key in (item.get("title") or ""):
+        if marker in (item.get("title") or ""):
             return item.get("number")
     return None
 
