@@ -542,3 +542,14 @@ any one name that went wrong once.
 `CLAUDE.md` is the working agreement: what each module may depend on, why the
 decisions above were made, and what was tried and rejected. `tests/fixtures/`
 holds a fixture per named failure mode, described in its own README.
+
+## How this was built
+
+Built with Claude Code as a pair programmer. I set the scope and the decisions
+recorded in `CLAUDE.md`; Claude wrote much of the code and the tests, and many
+commits carry its co-author trailer. I reviewed each change before merging it.
+The test suite and the daily run on the
+[testbed](https://github.com/Johndenisnyagah/watchdog-testbed) are the evidence
+that it works, not the tool that helped write it.
+
+Release-by-release changes are in [`CHANGELOG.md`](CHANGELOG.md).
