@@ -193,6 +193,47 @@ def test_find_existing_issue_ignores_a_match_whose_title_lacks_the_key(monkeypat
     assert find_existing_issue(REPO, "CVE-1::python::x", TOKEN) is None
 
 
+
+def test_find_existing_issue_does_not_match_a_longer_package_name(monkeypatch):
+    """The key is a substring of another package's key when one name extends
+    the other: `lodash` and `lodash.set`, `@babel/core` and `@babel/core-js`.
+    Accepting that issue's number would record this finding as already filed
+    and it would never get an issue of its own - the one direction this tool
+    must not fail in."""
+    transport(monkeypatch, Ok(200, {"items": [
+        {"number": 21, "title": "High: CVE-1 in lodash.set [CVE-1::npm::lodash.set]"},
+    ]}))
+    assert find_existing_issue(REPO, "CVE-1::npm::lodash", TOKEN) is None
+
+
+def test_find_existing_issue_does_not_match_a_longer_scoped_name(monkeypatch):
+    transport(monkeypatch, Ok(200, {"items": [
+        {"number": 22,
+         "title": "High: CVE-1 in @babel/core-js [CVE-1::npm::@babel/core-js]"},
+    ]}))
+    assert find_existing_issue(REPO, "CVE-1::npm::@babel/core", TOKEN) is None
+
+
+def test_find_existing_issue_skips_the_near_miss_and_finds_the_real_one(monkeypatch):
+    transport(monkeypatch, Ok(200, {"items": [
+        {"number": 21, "title": "High: CVE-1 in lodash.set [CVE-1::npm::lodash.set]"},
+        {"number": 23, "title": "High: CVE-1 in lodash [CVE-1::npm::lodash]"},
+    ]}))
+    assert find_existing_issue(REPO, "CVE-1::npm::lodash", TOKEN) == 23
+
+
+def test_find_existing_issue_matches_the_title_render_issue_writes():
+    """The search and the title format must agree, or every issue is refiled."""
+    from src.issues import render_issue
+    from src.model import Finding
+    subject = Finding(
+        key="CVE-2023-45133::npm::@babel/traverse", id="CVE-2023-45133",
+        aliases=frozenset({"CVE-2023-45133"}), package_name="@babel/traverse",
+        package_type="npm", versions=("7.23.0",), severity="Critical",
+        fixed_in=("7.23.2",), fix_state="fixed")
+    title, _, _ = render_issue(subject, {subject.key: subject})
+    assert title.endswith(f"[{subject.key}]")
+
 # --- ensure_labels --------------------------------------------------------
 
 def test_ensure_labels_creates_only_the_missing_ones(monkeypatch):
