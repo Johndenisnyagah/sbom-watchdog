@@ -74,3 +74,19 @@ def test_the_dependabot_comparison_says_where_dependabot_is_better():
     assert "## Why not Dependabot alerts?" in text()
     assert "Use them as well" in readme
     assert "fixes nothing" in readme
+
+
+def test_the_ai_assistance_note_names_the_tool_and_the_human_role():
+    section = prose().split("## How this was built", 1)
+    assert len(section) == 2, "README lost its AI-assistance note"
+    note = section[1]
+    assert "Claude Code" in note
+    assert "reviewed" in note
+    assert "CLAUDE.md" in note
+
+
+def test_the_changelog_covers_every_released_tag():
+    changelog = (README.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [Unreleased]" in changelog
+    for version in ("1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"):
+        assert f"## [{version}] - " in changelog
