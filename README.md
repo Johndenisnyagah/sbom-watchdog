@@ -432,8 +432,10 @@ repository. On a public repository that also means the issues are public, which
 is a choice to make deliberately.
 
 It matches against Grype's database, which includes NVD records that Dependabot
-does not alert on until GitHub has reviewed the advisory, so the two will
-sometimes disagree. Scanner actions such as `anchore/scan-action` run Grype too,
+does not alert on until GitHub has reviewed the advisory, so the two can
+disagree. On the testbed on 26 October 2026 they did not: both listed the same
+25 vulnerabilities at the same severities. The difference is not what is
+detected but the record kept around it. Scanner actions such as `anchore/scan-action` run Grype too,
 but fail a build or upload results rather than keeping a record between runs,
 so every run reports everything again.
 
